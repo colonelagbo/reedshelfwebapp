@@ -1,0 +1,197 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Baloo 2", ui-rounded, "Segoe UI", sans-serif;
+  --font-accent: "Playfair Display", Georgia, serif;
+
+  --color-ink: #0b1619;
+  --color-ink-soft: #12232a;
+  --color-navy: #063b5c;
+  --color-navy-soft: #0a4d74;
+  --color-teal: #009689;
+  --color-teal-dark: #007268;
+  --color-teal-light: #5fc4b8;
+  --color-gold: #d6a84a;
+  --color-gold-soft: #e8c785;
+  --color-paper: #f6f4ee;
+}
+
+@layer base {
+  :root {
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: #0b1619;
+    background: #f6f4ee;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  html,
+  body {
+    transition: background-color 0.35s ease, color 0.35s ease;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: #f6f4ee;
+  }
+
+  html.dark body {
+    background: #0b1619;
+    color: #f6f4ee;
+  }
+
+  a {
+    text-decoration: none;
+  }
+
+  ::selection {
+    background: #d6a84a;
+    color: #0b1619;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #f6f4ee;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #009689;
+    border-radius: 999px;
+  }
+
+  :focus-visible {
+    outline: 2px solid #d6a84a;
+    outline-offset: 3px;
+  }
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@layer utilities {
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .font-display { font-family: var(--font-display); }
+  .font-accent { font-family: var(--font-accent); font-style: italic; }
+
+  /* Scroll-reveal: elements start hidden, .is-visible fades/rises them in */
+  .reveal {
+    opacity: 0;
+    transform: translateY(28px);
+    transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+  }
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-14px) rotate(1.5deg); }
+}
+@keyframes float-slower {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(16px); }
+}
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(214, 168, 74, 0.45); }
+  70% { box-shadow: 0 0 0 14px rgba(214, 168, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(214, 168, 74, 0); }
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+
+/* ReedShelf visual system: softer paper in light mode and deeper, low-glare surfaces in dark mode. */
+:root {
+  --rs-paper: #f1eee6;
+  --rs-surface: #faf8f2;
+  --rs-surface-2: #f5f2ea;
+  --rs-border: #ddd8ca;
+  --rs-ink: #173033;
+  --rs-muted: #62736f;
+  --rs-dark: #0d191b;
+  --rs-dark-surface: #142326;
+  --rs-dark-surface-2: #1a2d30;
+  --rs-dark-border: rgba(255,255,255,.10);
+}
+
+body { background: var(--rs-paper); color: var(--rs-ink); }
+
+.bg-white { background-color: var(--rs-surface) !important; }
+.border-[#e4e1d6] { border-color: var(--rs-border) !important; }
+.bg-[#f6f4ee] { background-color: var(--rs-paper) !important; }
+.text-[#0b1619] { color: var(--rs-ink) !important; }
+.text-[#4a5a58], .text-[#5c6b68], .text-[#6b7a77], .text-[#557067] { color: var(--rs-muted) !important; }
+
+.dark body { background: var(--rs-dark); color: #f3f0e8; }
+.dark .bg-white { background-color: var(--rs-dark-surface) !important; }
+.dark .bg-[#f6f4ee] { background-color: var(--rs-dark) !important; }
+.dark .border-[#e4e1d6] { border-color: var(--rs-dark-border) !important; }
+.dark .text-[#0b1619] { color: #f3f0e8 !important; }
+.dark .text-[#4a5a58], .dark .text-[#5c6b68], .dark .text-[#6b7a77], .dark .text-[#557067] { color: rgba(243,240,232,.62) !important; }
+
+.dark .bg-[#fbfcf9] { background-color: var(--rs-dark-surface) !important; }
+.dark .border-[#d5ddd1] { border-color: var(--rs-dark-border) !important; }
+.dark input, .dark select, .dark textarea { color: #f3f0e8; }
+
+/* PDF Text Layer Styles for Fullscreen Reader */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent !important;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.textLayer ::selection {
+  background: rgba(214, 168, 74, 0.5) !important;
+  color: transparent !important;
+}
