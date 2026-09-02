@@ -48,6 +48,16 @@ progressRouter.put('/:bookId', authenticateToken, (req, res) => {
       );
     }
 
+    // Also record real-time reading activity event
+    try {
+      db.run(
+        'INSERT INTO reading_activity (id, user_id, book_id, page, action, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [uid('act'), req.user.id, req.params.bookId, page, 'read', now]
+      );
+    } catch (e) {
+      // Activity logging is non-blocking
+    }
+
     res.json({ page, updatedAt: now });
   } catch (err) {
     console.error('Error saving progress:', err);

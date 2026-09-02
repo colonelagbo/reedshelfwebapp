@@ -19,9 +19,14 @@ export function authenticateToken(req, res, next) {
     const payload = jwt.verify(token, config.jwtSecret);
     
     // Ensure user still exists in DB
-    const user = db.get('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [payload.id]);
+    const user = db.get('SELECT id, name, email, avatar, role, status, created_at FROM users WHERE id = ?', [payload.id]);
     if (!user) {
       return res.status(401).json({ error: 'User account no longer exists.' });
+    }
+
+    // Check account status
+    if (user.status === 'suspended') {
+      return res.status(403).json({ error: 'Your account has been suspended. Please contact an administrator.' });
     }
 
     req.user = user;
@@ -42,13 +47,29 @@ export function optionalToken(req, res, next) {
   if (token) {
     try {
       const payload = jwt.verify(token, config.jwtSecret);
-      const user = db.get('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [payload.id]);
-      if (user) {
+      const user = db.get('SELECT id, name, email, avatar, role, status, created_at FROM users WHERE id = ?', [payload.id]);
+      if (user && user.status !== 'suspended') {
         req.user = user;
       }
     } catch {
       // Ignore invalid token for optional auth
     }
+  }
+
+  next();
+}
+
+export function requireAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required. Please sign in.' });
+  }
+
+  if (req.user.status === 'suspended') {
+    return res.status(403).json({ error: 'Your account has been suspended. Please contact an administrator.' });
+  }
+
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Access denied: Administrator privileges required.' });
   }
 
   next();

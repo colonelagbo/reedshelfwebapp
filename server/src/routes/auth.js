@@ -12,7 +12,7 @@ const uid = (prefix = 'user') => `${prefix}_${crypto.randomBytes(8).toString('he
 
 function generateToken(user) {
   return jwt.sign(
-    { id: user.id, email: user.email, name: user.name },
+    { id: user.id, email: user.email, name: user.name, role: user.role || 'user' },
     config.jwtSecret,
     { expiresIn: '30d' }
   );
@@ -31,6 +31,12 @@ authRouter.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
     }
 
+    // Check if new registrations are disabled by admin
+    const allowReg = db.get("SELECT value FROM admin_settings WHERE key = 'allow_registrations'");
+    if (allowReg && allowReg.value === 'false') {
+      return res.status(403).json({ error: 'New user registrations are currently disabled by the administrator.' });
+    }
+
     const trimmedEmail = email.trim().toLowerCase();
     const existing = db.get('SELECT id FROM users WHERE email = ?', [trimmedEmail]);
     if (existing) {
@@ -41,9 +47,12 @@ authRouter.post('/register', async (req, res) => {
     const userId = uid('user');
     const createdAt = new Date().toISOString();
 
+    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
+    const initialRole = (adminEmail && trimmedEmail === adminEmail) ? 'admin' : 'user';
+
     db.run(
-      'INSERT INTO users (id, name, email, password, avatar, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, name.trim(), trimmedEmail, hashedPassword, null, createdAt]
+      'INSERT INTO users (id, name, email, password, avatar, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [userId, name.trim(), trimmedEmail, hashedPassword, null, initialRole, 'active', createdAt]
     );
 
     // Create default settings
@@ -61,6 +70,8 @@ authRouter.post('/register', async (req, res) => {
       name: name.trim(),
       email: trimmedEmail,
       avatar: null,
+      role: initialRole,
+      status: 'active',
       createdAt,
     };
 
@@ -88,6 +99,11 @@ authRouter.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Incorrect email or password.' });
     }
 
+    // Check account status
+    if (user.status === 'suspended') {
+      return res.status(403).json({ error: 'Your account has been suspended. Please contact an administrator.' });
+    }
+
     // Support both bcrypt hashes and plain text passwords (from migrated demo stores)
     let passwordValid = false;
     if (user.password.startsWith('$2a$') || user.password.startsWith('$2b$')) {
@@ -110,6 +126,8 @@ authRouter.post('/login', async (req, res) => {
       name: user.name,
       email: user.email,
       avatar: user.avatar,
+      role: user.role || 'user',
+      status: user.status || 'active',
       createdAt: user.created_at,
     };
 
@@ -135,6 +153,8 @@ authRouter.get('/me', authenticateToken, (req, res) => {
         name: user.name,
         email: user.email,
         avatar: user.avatar,
+        role: user.role || 'user',
+        status: user.status || 'active',
         createdAt: user.created_at,
       },
       stats: {
@@ -173,13 +193,15 @@ authRouter.put('/profile', authenticateToken, (req, res) => {
     params.push(req.user.id);
     db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = db.get('SELECT id, name, email, avatar, created_at FROM users WHERE id = ?', [req.user.id]);
+    const updated = db.get('SELECT id, name, email, avatar, role, status, created_at FROM users WHERE id = ?', [req.user.id]);
     res.json({
       user: {
         id: updated.id,
         name: updated.name,
         email: updated.email,
         avatar: updated.avatar,
+        role: updated.role || 'user',
+        status: updated.status || 'active',
         createdAt: updated.created_at,
       }
     });

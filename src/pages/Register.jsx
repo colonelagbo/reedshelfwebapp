@@ -72,7 +72,7 @@ export function Register() {
                 required
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] py-3 pl-10 pr-3 text-sm outline-none transition focus:border-[#009689] focus:ring-4 focus:ring-[#009689]/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-[#5fc4b8] dark:focus:ring-[#5fc4b8]/20"
+                className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] py-3 pl-10 pr-3 text-base sm:text-sm outline-none transition focus:border-[#009689] focus:ring-4 focus:ring-[#009689]/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-[#5fc4b8] dark:focus:ring-[#5fc4b8]/20"
                 placeholder="Your name"
                 autoComplete="name"
               />
@@ -89,7 +89,7 @@ export function Register() {
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] py-3 pl-10 pr-3 text-sm outline-none transition focus:border-[#009689] focus:ring-4 focus:ring-[#009689]/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-[#5fc4b8] dark:focus:ring-[#5fc4b8]/20"
+                className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] py-3 pl-10 pr-3 text-base sm:text-sm outline-none transition focus:border-[#009689] focus:ring-4 focus:ring-[#009689]/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-[#5fc4b8] dark:focus:ring-[#5fc4b8]/20"
                 placeholder="you@example.com"
                 autoComplete="email"
               />
@@ -108,7 +108,7 @@ export function Register() {
               type={show ? 'text' : 'password'}
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] py-3 pl-10 pr-11 text-sm outline-none transition focus:border-[#009689] focus:ring-4 focus:ring-[#009689]/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-[#5fc4b8] dark:focus:ring-[#5fc4b8]/20"
+              className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] py-3 pl-10 pr-11 text-base sm:text-sm outline-none transition focus:border-[#009689] focus:ring-4 focus:ring-[#009689]/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/30 dark:focus:border-[#5fc4b8] dark:focus:ring-[#5fc4b8]/20"
               placeholder="At least 6 characters"
               autoComplete="new-password"
             />

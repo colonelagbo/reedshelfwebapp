@@ -243,4 +243,83 @@ export const api = {
       return await apiRequest('/api/health');
     },
   },
+
+  admin: {
+    async getOverview() {
+      return await apiRequest('/api/admin/overview');
+    },
+
+    async getStorage() {
+      return await apiRequest('/api/admin/storage');
+    },
+
+    async getStorageUsers(params = {}) {
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined && v !== ''));
+      const qs = new URLSearchParams(cleanParams).toString();
+      return await apiRequest(`/api/admin/storage/users${qs ? `?${qs}` : ''}`);
+    },
+
+    async getUsers(params = {}) {
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined && v !== ''));
+      const qs = new URLSearchParams(cleanParams).toString();
+      return await apiRequest(`/api/admin/users${qs ? `?${qs}` : ''}`);
+    },
+
+    async getUser(id) {
+      return await apiRequest(`/api/admin/users/${id}`);
+    },
+
+    async updateUserStatus(id, { status, reason } = {}) {
+      return await apiRequest(`/api/admin/users/${id}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status, reason }),
+      });
+    },
+
+    async updateUserRole(id, { role } = {}) {
+      return await apiRequest(`/api/admin/users/${id}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role }),
+      });
+    },
+
+    async deleteUser(id) {
+      return await apiRequest(`/api/admin/users/${id}`, {
+        method: 'DELETE',
+      });
+    },
+
+    async getBooks(params = {}) {
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined && v !== ''));
+      const qs = new URLSearchParams(cleanParams).toString();
+      return await apiRequest(`/api/admin/books${qs ? `?${qs}` : ''}`);
+    },
+
+    async getReadingActivity() {
+      return await apiRequest('/api/admin/reading-activity');
+    },
+
+    async getSettings() {
+      return await apiRequest('/api/admin/settings');
+    },
+
+    async updateSettings(settings) {
+      return await apiRequest('/api/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      });
+    },
+
+    async getAuditLogs(params = {}) {
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined && v !== ''));
+      const qs = new URLSearchParams(cleanParams).toString();
+      return await apiRequest(`/api/admin/audit-logs${qs ? `?${qs}` : ''}`);
+    },
+
+    async setupFirstAdmin() {
+      return await apiRequest('/api/admin/setup-first-admin', {
+        method: 'POST',
+      });
+    },
+  },
 };

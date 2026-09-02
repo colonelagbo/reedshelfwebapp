@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "server": "node server/src/index.js",
     "server:dev": "node --watch server/src/index.js",
-    "start": "node server/src/index.js"
+    "start": "node server/src/index.js",
+    "make-admin": "node server/scripts/makeAdmin.js"
   },
   "dependencies": {
     "@radix-ui/react-toast": "^1.2.14",
