@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { BookOpen, Home, Library, ListChecks, Settings, UserCircle, Upload, LogOut, Menu, X } from 'lucide-react';
-import { useState } from 'react';
-import { getCurrentUser, logoutUser, getSettings } from '../lib/appStore';
+import { useState, useEffect } from 'react';
+import { getCurrentUser, logoutUser, getSettings, api } from '../lib/appStore';
 import { LogoPlaceholder } from './LogoPlaceholder';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -15,7 +15,14 @@ const nav = [
 export function AppShell({ children }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const user = getCurrentUser();
+  const [user, setUser] = useState(() => getCurrentUser());
+
+  useEffect(() => {
+    api.auth.getMe().then((res) => {
+      if (res?.user) setUser(res.user);
+    }).catch(() => {});
+  }, []);
+
   const logout = () => {
     if (getSettings(user?.id).confirmSignOut && !window.confirm('Sign out of ReedShelf?')) return;
     logoutUser();

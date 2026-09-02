@@ -12,7 +12,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
-import { addBook, getCurrentUser, saveBookFile } from '../lib/appStore';
+import { addBook, getCurrentUser, saveBookFile, uploadBookFileToCloudflare } from '../lib/appStore';
 import { extractPdfInfo } from '../lib/pdfMetadata';
 
 export function Upload() {
@@ -112,17 +112,30 @@ export function Upload() {
       const totalPages = extractedInfo?.totalPages || 0;
       const coverDataUrl = extractedInfo?.coverDataUrl || null;
 
-      const book = addBook({
-        title,
-        author,
-        fileName: file.name,
-        fileType: file.type || 'application/pdf',
-        size: file.size,
-        uploadedBy: user.id,
-        totalPages,
-        coverDataUrl,
-      });
+      let book;
+      try {
+        // Upload to Cloudflare R2 backend
+        book = await uploadBookFileToCloudflare(file, {
+          title,
+          author,
+          totalPages,
+          coverDataUrl,
+        });
+      } catch (backendErr) {
+        console.warn('Backend upload failed, saving to local store:', backendErr);
+        book = addBook({
+          title,
+          author,
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          size: file.size,
+          uploadedBy: user?.id || 'demo_user',
+          totalPages,
+          coverDataUrl,
+        });
+      }
 
+      // Cache locally in IndexedDB/memory for instantaneous reader opening
       await saveBookFile(book.id, file);
       navigate('/app/library');
     } catch (err) {

@@ -24,6 +24,8 @@ import {
   getProgress,
   getUserBooks,
   getUserPlans,
+  fetchBooks,
+  fetchPlans,
 } from '../lib/appStore';
 
 const PRESET_DAYS = [
@@ -36,17 +38,24 @@ const PRESET_DAYS = [
 export function ReadingPlans() {
   const user = getCurrentUser();
   const navigate = useNavigate();
-  const books = getUserBooks(user?.id || '');
-
-  const [plans, setPlans] = useState([]);
+  const [books, setBooks] = useState(() => getUserBooks(user?.id || ''));
+  const [plans, setPlans] = useState(() => (user?.id ? getUserPlans(user.id) : []));
   const [open, setOpen] = useState(false);
-  const [selectedBookId, setSelectedBookId] = useState(books[0]?.id || '');
+  const [selectedBookId, setSelectedBookId] = useState('');
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [days, setDays] = useState(14);
 
   useEffect(() => {
     if (user?.id) {
-      setPlans(getUserPlans(user.id));
+      fetchPlans().then((p) => p && setPlans(p)).catch(() => {});
+      fetchBooks().then((b) => {
+        if (b) {
+          setBooks(b);
+          if (!selectedBookId && b.length > 0) {
+            setSelectedBookId(b[0].id);
+          }
+        }
+      }).catch(() => {});
     }
   }, [user?.id]);
 
@@ -111,27 +120,31 @@ export function ReadingPlans() {
     };
   }, [pagesPerDay]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBook?.id || !user?.id) return;
 
-    const newPlan = addPlan({
-      bookId: selectedBook.id,
-      userId: user.id,
-      startDate,
-      targetDate,
-      days: numDays,
-      pagesPerDay,
-      totalPages,
-    });
+    try {
+      const newPlan = await addPlan({
+        bookId: selectedBook.id,
+        userId: user.id,
+        startDate,
+        targetDate,
+        days: numDays,
+        pagesPerDay,
+        totalPages,
+      });
 
-    setPlans([newPlan, ...plans]);
-    setOpen(false);
+      setPlans([newPlan, ...plans]);
+      setOpen(false);
+    } catch (err) {
+      console.error('Error adding plan:', err);
+    }
   };
 
-  const handleRemove = (id) => {
+  const handleRemove = async (id) => {
     if (window.confirm('Delete this reading plan?')) {
-      deletePlan(id);
+      await deletePlan(id);
       setPlans(plans.filter((p) => p.id !== id));
     }
   };

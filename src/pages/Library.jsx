@@ -18,6 +18,7 @@ import { BookCard } from '../components/BookCard';
 import {
   getCurrentUser,
   getUserBooks,
+  fetchBooks,
   getProgress,
   getSettings,
   saveSettings,
@@ -45,35 +46,21 @@ export function Library() {
 
   const userId = user?.id;
 
-  useEffect(() => {
+  const loadBooks = async () => {
     if (!userId) return;
-    const currentBooks = getUserBooks(userId);
-    setBooks(currentBooks);
+    const initial = getUserBooks(userId);
+    setBooks(initial);
 
-    // Asynchronously backfill original cover or totalPages for existing books that lack them
-    currentBooks.forEach(async (b) => {
-      if (!b.coverDataUrl || !b.totalPages) {
-        try {
-          const file = await getBookFile(b.id);
-          if (file) {
-            const info = await extractPdfInfo(file, b.fileName);
-            const updates = {};
-            if (info.coverDataUrl && !b.coverDataUrl) {
-              updates.coverDataUrl = info.coverDataUrl;
-            }
-            if (info.totalPages && !b.totalPages) {
-              updates.totalPages = info.totalPages;
-            }
-            if (Object.keys(updates).length > 0) {
-              updateBook(b.id, updates);
-              setBooks(getUserBooks(userId));
-            }
-          }
-        } catch (e) {
-          console.warn('Could not auto-generate cover for existing book:', b.id, e);
-        }
-      }
-    });
+    try {
+      const fetched = await fetchBooks();
+      setBooks(fetched);
+    } catch (e) {
+      console.warn('Could not load remote books:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadBooks();
   }, [userId]);
 
   const filtered = useMemo(
@@ -96,7 +83,8 @@ export function Library() {
     setDeleting(true);
     try {
       await deleteBook(bookToDelete.id);
-      setBooks(getUserBooks(userId));
+      const updated = await fetchBooks();
+      setBooks(updated);
       setBookToDelete(null);
     } catch (err) {
       console.error('Failed to delete book:', err);

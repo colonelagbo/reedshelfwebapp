@@ -3,5 +3,107 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, BookOpen, CalendarDays, Plus, Sparkles } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { BookCard } from '../components/BookCard';
-import { getCurrentUser, getUserBooks, getProgress, getUserPlans } from '../lib/appStore';
-export function Dashboard(){const user=getCurrentUser();const [books,setBooks]=useState([]);const [plans,setPlans]=useState([]);const navigate=useNavigate();useEffect(()=>{setBooks(getUserBooks(user.id));setPlans(getUserPlans(user.id));},[user.id]);const progress=b=>{const p=getProgress(user.id,b.id).page;return b.totalPages?Math.round((p/b.totalPages)*100):0};const started=books.filter(b=>getProgress(user.id,b.id).page>1).slice(0,3);return <AppShell><div className="mx-auto max-w-7xl"><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#007268]">Good to see you</p><h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">Welcome, {user.name.split(' ')[0]}.</h1><p className="mt-2 text-[#4a5a58]">Keep your reading momentum going.</p></div><Link to="/app/upload" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#d6a84a] hover:text-[#0b1619]"><Plus size={18}/> Upload a book</Link></div><div className="mt-8 grid gap-4 md:grid-cols-3"><div className="rounded-2xl bg-[#0b1619] p-5 text-white dark:border dark:border-white/10"><BookOpen className="text-[#d6a84a]"/><p className="mt-5 text-3xl font-bold">{books.length}</p><p className="text-sm text-white/60">Books in your library</p></div><div className="rounded-2xl border border-[#e4e1d6] bg-white dark:border-white/10 dark:bg-[#12232a] p-5"><CalendarDays className="text-[#009689]"/><p className="mt-5 text-3xl font-bold">{plans.length}</p><p className="text-sm text-[#6b7a77]">Active reading plans</p></div><div className="rounded-2xl border border-[#e4e1d6] bg-white dark:border-white/10 dark:bg-[#12232a] p-5"><Sparkles className="text-[#009689]"/><p className="mt-5 text-3xl font-bold">{started.length}</p><p className="text-sm text-[#6b7a77]">Books in progress</p></div></div><section className="mt-10"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-xl font-bold">Continue reading</h2><p className="mt-1 text-sm text-[#6b7a77]">Pick up where you left off.</p></div><Link to="/app/library" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4a5a58]">View library <ArrowRight size={16}/></Link></div>{started.length? <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{started.map(b=><BookCard key={b.id} book={b} progress={progress(b)} onOpen={()=>navigate(`/app/reader/${b.id}`)}/>)}</div>:<div className="rounded-2xl border border-dashed border-[#c9d6d2] bg-white p-10 text-center dark:border-white/15 dark:bg-white/5"><BookOpen className="mx-auto text-[#6b7a77]"/><h3 className="mt-3 font-bold">Nothing in progress yet</h3><p className="mx-auto mt-1 max-w-md text-sm text-[#6b7a77]">Upload a PDF and start reading. Reedshelf will remember your place for next time.</p><Link to="/app/upload" className="mt-5 inline-flex rounded-xl bg-[#009689] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#d6a84a] hover:text-[#0b1619]">Upload your first book</Link></div>}</section></div></AppShell>}
+import { getCurrentUser, getUserBooks, getProgress, getUserPlans, fetchBooks, fetchPlans } from '../lib/appStore';
+
+export function Dashboard() {
+  const user = getCurrentUser();
+  const [books, setBooks] = useState([]);
+  const [plans, setPlans] = useState([]);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!user?.id) return;
+    setBooks(getUserBooks(user.id));
+    setPlans(getUserPlans(user.id));
+
+    // Fetch fresh data from backend
+    fetchBooks().then((b) => b && setBooks(b)).catch(() => {});
+    fetchPlans().then((p) => p && setPlans(p)).catch(() => {});
+  }, [user?.id]);
+
+  const progress = (b) => {
+    const p = getProgress(user?.id, b.id).page;
+    return b.totalPages ? Math.round((p / b.totalPages) * 100) : 0;
+  };
+
+  const started = books.filter((b) => getProgress(user?.id, b.id).page > 1).slice(0, 3);
+
+  return (
+    <AppShell>
+      <div className="mx-auto max-w-7xl">
+        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-[#007268]">Good to see you</p>
+            <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">
+              Welcome, {user?.name?.split(' ')[0] || 'Reader'}.
+            </h1>
+            <p className="mt-2 text-[#4a5a58]">Keep your reading momentum going.</p>
+          </div>
+          <Link
+            to="/app/upload"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#d6a84a] hover:text-[#0b1619]"
+          >
+            <Plus size={18} /> Upload a book
+          </Link>
+        </div>
+
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl bg-[#0b1619] p-5 text-white dark:border dark:border-white/10">
+            <BookOpen className="text-[#d6a84a]" />
+            <p className="mt-5 text-3xl font-bold">{books.length}</p>
+            <p className="text-sm text-white/60">Books in your library</p>
+          </div>
+          <div className="rounded-2xl border border-[#e4e1d6] bg-white p-5 dark:border-white/10 dark:bg-[#12232a]">
+            <CalendarDays className="text-[#009689]" />
+            <p className="mt-5 text-3xl font-bold">{plans.length}</p>
+            <p className="text-sm text-[#6b7a77]">Active reading plans</p>
+          </div>
+          <div className="rounded-2xl border border-[#e4e1d6] bg-white p-5 dark:border-white/10 dark:bg-[#12232a]">
+            <Sparkles className="text-[#009689]" />
+            <p className="mt-5 text-3xl font-bold">{started.length}</p>
+            <p className="text-sm text-[#6b7a77]">Books in progress</p>
+          </div>
+        </div>
+
+        <section className="mt-10">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold">Continue reading</h2>
+              <p className="mt-1 text-sm text-[#6b7a77]">Pick up where you left off.</p>
+            </div>
+            <Link to="/app/library" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4a5a58]">
+              View library <ArrowRight size={16} />
+            </Link>
+          </div>
+
+          {started.length ? (
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {started.map((b) => (
+                <BookCard
+                  key={b.id}
+                  book={b}
+                  progress={progress(b)}
+                  onOpen={() => navigate(`/app/reader/${b.id}`)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-[#c9d6d2] bg-white p-10 text-center dark:border-white/15 dark:bg-white/5">
+              <BookOpen className="mx-auto text-[#6b7a77]" />
+              <h3 className="mt-3 font-bold">Nothing in progress yet</h3>
+              <p className="mx-auto mt-1 max-w-md text-sm text-[#6b7a77]">
+                Upload a PDF and start reading. ReedShelf will remember your place for next time.
+              </p>
+              <Link
+                to="/app/upload"
+                className="mt-5 inline-flex rounded-xl bg-[#009689] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#d6a84a] hover:text-[#0b1619]"
+              >
+                Upload your first book
+              </Link>
+            </div>
+          )}
+        </section>
+      </div>
+    </AppShell>
+  );
+}
