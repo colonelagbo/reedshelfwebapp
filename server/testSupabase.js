@@ -72,6 +72,8 @@ async function testConnection() {
   }
   console.log('✅ Successfully downloaded the test file back');
 
+
+  
   // 4. Clean up
   const { error: deleteError } = await supabase.storage
     .from(bucketName)
