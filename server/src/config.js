@@ -9,10 +9,13 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
+const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+
 export const config = {
+  isVercel,
   port: parseInt(process.env.PORT || '5000', 10),
   jwtSecret: process.env.JWT_SECRET || 'reedshelf_jwt_secret_dev_key_2026_change_in_production',
-  databasePath: process.env.DATABASE_PATH || path.resolve(__dirname, '../data/reedshelf.db'),
+  databasePath: process.env.DATABASE_PATH || (isVercel ? '/tmp/reedshelf.db' : path.resolve(__dirname, '../data/reedshelf.db')),
   corsOrigin: process.env.CORS_ORIGIN || '*',
   
   supabase: {
