@@ -3,7 +3,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Readable } from 'stream';
 import { createClient } from '@supabase/supabase-js';
-import WebSocket from 'ws';
 import { config } from '../config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,9 +23,6 @@ function getSupabaseClient() {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
-      },
-      realtime: {
-        transport: WebSocket,
       },
     });
     console.log(`[Supabase] Client initialized for ${config.supabase.url} (bucket: ${config.supabase.bucketName})`);

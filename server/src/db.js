@@ -220,57 +220,10 @@ class JsonStoreAdapter {
 
 let jsonStore = null;
 
-if (!config.isVercel) {
-  try {
-    // Dynamically import better-sqlite3 for local environment
-    const Database = (await import('better-sqlite3')).default;
-    dbInstance = new Database(config.databasePath);
-    dbInstance.pragma('journal_mode = WAL');
-    dbInstance.pragma('foreign_keys = ON');
-    dbInstance.exec(SCHEMA);
-
-    // Safe migrations on existing table
-    try {
-      dbInstance.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'");
-    } catch {}
-    try {
-      dbInstance.exec("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active'");
-    } catch {}
-
-    // Create indexes on migrated columns
-    try {
-      dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)");
-      dbInstance.exec("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)");
-    } catch {}
-
-    // Seed default admin settings
-    const now = new Date().toISOString();
-    try {
-      dbInstance.prepare("INSERT OR IGNORE INTO admin_settings (key, value, updated_at) VALUES ('storage_limit_gb', '100', ?)").run(now);
-      dbInstance.prepare("INSERT OR IGNORE INTO admin_settings (key, value, updated_at) VALUES ('allow_registrations', 'true', ?)").run(now);
-      dbInstance.prepare("INSERT OR IGNORE INTO admin_settings (key, value, updated_at) VALUES ('max_upload_size_mb', '100', ?)").run(now);
-    } catch {}
-
-    // Auto-promote admin if configured
-    const defaultAdmins = ['link4emmy@gmail.com'];
-    if (process.env.ADMIN_EMAIL) defaultAdmins.push(process.env.ADMIN_EMAIL.trim().toLowerCase());
-    for (const email of defaultAdmins) {
-      try {
-        dbInstance.prepare("UPDATE users SET role = 'admin', status = 'active' WHERE LOWER(email) = ?").run(email);
-      } catch {}
-    }
-
-    console.log(`[DB] SQLite database initialized at ${config.databasePath}`);
-  } catch (err) {
-    console.warn('[DB] better-sqlite3 not available or failed to load. Using robust JSON database fallback:', err.message);
-    useFallbackDb = true;
-    jsonStore = new JsonStoreAdapter(config.databasePath);
-  }
-} else {
-  // On Vercel / serverless: Use pure JavaScript storage adapter
-  useFallbackDb = true;
-  jsonStore = new JsonStoreAdapter(config.databasePath);
-}
+// Use the pure-JavaScript adapter everywhere. It avoids native SQLite
+// dependencies that can fail during serverless function initialization.
+useFallbackDb = true;
+jsonStore = new JsonStoreAdapter(config.databasePath);
 
 export const db = {
   all(sql, params = []) {
