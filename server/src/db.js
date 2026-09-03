@@ -191,15 +191,17 @@ class JsonStoreAdapter {
       this.data.admin_settings.push({ key: 'max_upload_size_mb', value: '100', updated_at: now });
     }
 
-    // Always seed link4emmy@gmail.com as primary administrator
+    // Always seed link4emmy@gmail.com as primary administrator with constant ID across all serverless containers
     const targetEmail = 'link4emmy@gmail.com';
+    const fixedAdminId = 'admin_usr_link4emmy';
     const existingAdmin = this.data.users.find(u => u.email?.toLowerCase() === targetEmail);
     if (existingAdmin) {
+      existingAdmin.id = fixedAdminId;
       existingAdmin.role = 'admin';
       existingAdmin.status = 'active';
     } else {
       this.data.users.push({
-        id: 'admin_primary_' + Date.now(),
+        id: fixedAdminId,
         name: 'Platform Admin',
         email: targetEmail,
         // Hashed 'ReedshelfAdmin2026!'
