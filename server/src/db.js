@@ -2,10 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { config } from './config.js';
 
-// Ensure data directory exists
-const dbDir = path.dirname(config.databasePath);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+// Ensure data directory exists (safe for read-only serverless filesystems)
+try {
+  const dbDir = path.dirname(config.databasePath);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+} catch (e) {
+  // Ignored on read-only environments
 }
 
 let dbInstance = null;

@@ -16,9 +16,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Local fallback directory if Cloudflare R2 keys are not configured
-const localUploadsDir = path.resolve(__dirname, '../../uploads');
-if (!fs.existsSync(localUploadsDir)) {
-  fs.mkdirSync(localUploadsDir, { recursive: true });
+const localUploadsDir = config.isVercel
+  ? '/tmp/uploads'
+  : path.resolve(__dirname, '../../uploads');
+
+try {
+  if (!fs.existsSync(localUploadsDir)) {
+    fs.mkdirSync(localUploadsDir, { recursive: true });
+  }
+} catch (e) {
+  // Safe on read-only serverless filesystems
 }
 
 let s3Client = null;
