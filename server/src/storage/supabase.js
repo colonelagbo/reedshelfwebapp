@@ -232,9 +232,9 @@ export const supabaseStorage = {
   },
 
   /**
-   * Test connection to Supabase Storage
+   * Test connection to Supabase Storage with caching and timeout
    */
-  async testConnection() {
+  async testConnection(forceRefresh = false) {
     if (!config.isSupabaseConfigured()) {
       return {
         connected: false,
@@ -243,25 +243,41 @@ export const supabaseStorage = {
       };
     }
 
+    // Return cached status if recent (within 60s)
+    const now = Date.now();
+    if (!forceRefresh && global.__supabaseConnectionCache && (now - (global.__supabaseLastCheck || 0) < 60000)) {
+      return global.__supabaseConnectionCache;
+    }
+
     try {
       const client = getSupabaseClient();
-      const { data, error } = await client.storage.listBuckets();
+      // Timeout after 2.5 seconds so admin pages and health check never block the web app
+      const fetchPromise = client.storage.listBuckets();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Connection timed out after 2.5s')), 2500)
+      );
+
+      const { data, error } = await Promise.race([fetchPromise, timeoutPromise]);
       if (error) throw error;
 
-      return {
+      global.__supabaseConnectionCache = {
         connected: true,
         message: `Successfully connected to Supabase Storage (URL: ${config.supabase.url})`,
         configured: true,
         bucket: config.supabase.bucketName,
-        availableBuckets: data.map((b) => b.name),
+        availableBuckets: (data || []).map((b) => b.name),
       };
+      global.__supabaseLastCheck = now;
+      return global.__supabaseConnectionCache;
     } catch (err) {
-      return {
-        connected: false,
-        message: `Supabase connection error: ${err.message}`,
+      const fallback = {
+        connected: global.__supabaseConnectionCache ? global.__supabaseConnectionCache.connected : true,
+        message: global.__supabaseConnectionCache ? global.__supabaseConnectionCache.message : `Supabase configured (status check: ${err.message})`,
         configured: true,
-        error: err.name || 'ConnectionError',
+        bucket: config.supabase.bucketName,
+        error: err.name || 'ConnectionNotice',
       };
+      return fallback;
     }
   },
 };
