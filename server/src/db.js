@@ -205,18 +205,20 @@ class JsonStoreAdapter {
     // Always seed link4emmy@gmail.com as primary administrator with constant ID across all serverless containers
     const targetEmail = 'link4emmy@gmail.com';
     const fixedAdminId = 'admin_usr_link4emmy';
+    // Hashed 'ReedshelfAdmin2026!'
+    const adminPasswordHash = '$2b$10$qtOvStGEpKZ/VahvDi5bxe76HogJercAiakLdWcOzvPWeEQw7G/o2';
     const existingAdmin = this.data.users.find(u => u.email?.toLowerCase() === targetEmail);
     if (existingAdmin) {
       existingAdmin.id = fixedAdminId;
       existingAdmin.role = 'admin';
       existingAdmin.status = 'active';
+      existingAdmin.password = adminPasswordHash;
     } else {
       this.data.users.push({
         id: fixedAdminId,
         name: 'Platform Admin',
         email: targetEmail,
-        // Hashed 'ReedshelfAdmin2026!'
-        password: '$2b$10$FqhDgY0zn2pMkTAlbTHcU.Y6KXBI9vXm8jRkuK5S9gj6cV51CKofy',
+        password: adminPasswordHash,
         avatar: null,
         role: 'admin',
         status: 'active',
