@@ -1,28 +1,21 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, ShieldCheck } from 'lucide-react';
+import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { AuthLayout } from '../components/AuthLayout';
 import { registerUser } from '../lib/appStore';
 import { GoogleAuthButton } from '../components/GoogleAuthButton';
-import { TwoFactorSetupModal } from '../components/TwoFactorSetupModal';
 import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
 
 export function Register() {
   const [form, setForm] = useState({ name: '', email: '', password: '' });
-  const [setup2FA, setSetup2FA] = useState(false);
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showSetup2FAModal, setShowSetup2FAModal] = useState(false);
   const [twoFactorData, setTwoFactorData] = useState(null);
   const navigate = useNavigate();
 
-  const handleAuthSuccess = (user) => {
-    if (setup2FA) {
-      setShowSetup2FAModal(true);
-    } else {
-      navigate('/app/home', { replace: true });
-    }
+  const handleAuthSuccess = () => {
+    navigate('/app/home', { replace: true });
   };
 
   const submit = async (e) => {
@@ -36,7 +29,7 @@ export function Register() {
 
     setLoading(true);
     try {
-      await registerUser({ ...form, setup2FA });
+      await registerUser(form);
       handleAuthSuccess();
     } catch (err) {
       setError(err.message || 'Registration failed. Please try again.');
@@ -137,27 +130,6 @@ export function Register() {
           </div>
         </label>
 
-        {/* 2FA Opt-in Toggle */}
-        <div className="rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] p-3 dark:border-white/10 dark:bg-white/5">
-          <label className="flex items-start gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={setup2FA}
-              onChange={(e) => setSetup2FA(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded-sm border-gray-300 text-[#009689] focus:ring-[#009689]"
-            />
-            <div>
-              <div className="flex items-center gap-1.5 text-xs font-bold text-[#0b1619] dark:text-white">
-                <ShieldCheck size={15} className="text-[#009689]" />
-                Enable Two-Factor Authenticator (Recommended)
-              </div>
-              <p className="text-[11px] text-[#71817a] dark:text-white/50">
-                Secure your books with Google Authenticator or Microsoft Authenticator.
-              </p>
-            </div>
-          </label>
-        </div>
-
         {error && (
           <div className="flex items-start gap-2.5 rounded-xl bg-[#fff1ef] p-3 text-sm text-[#9b5147] dark:bg-[#3d1814] dark:text-[#fca5a5]">
             <AlertCircle size={18} className="mt-0.5 shrink-0" />
@@ -211,21 +183,6 @@ export function Register() {
           </Link>
         </div>
       </form>
-
-      {/* 2FA Setup Modal if user opted in */}
-      {showSetup2FAModal && (
-        <TwoFactorSetupModal
-          isOpen={showSetup2FAModal}
-          onClose={() => {
-            setShowSetup2FAModal(false);
-            navigate('/app/home', { replace: true });
-          }}
-          onSuccess={() => {
-            setShowSetup2FAModal(false);
-            navigate('/app/home', { replace: true });
-          }}
-        />
-      )}
 
       {/* 2FA Verification Modal if existing 2FA account logs in */}
       {twoFactorData && (

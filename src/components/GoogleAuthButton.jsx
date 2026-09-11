@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { Loader2, X, AlertCircle, Sparkles } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
-import { api } from '../lib/api';
+import { Loader2, X, AlertCircle } from 'lucide-react';
+import { loginWithGoogle } from '../lib/appStore';
 
 export function GoogleAuthButton({
   mode = 'signin', // 'signin' or 'signup'
@@ -12,6 +11,7 @@ export function GoogleAuthButton({
   className = ''
 }) {
   const [loading, setLoading] = useState(false);
+  const [quickLoadingEmail, setQuickLoadingEmail] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [modalForm, setModalForm] = useState({
     name: '',
@@ -19,51 +19,31 @@ export function GoogleAuthButton({
   });
   const [modalError, setModalError] = useState('');
 
-  const handleGoogleClick = async () => {
-    setLoading(true);
+  const handleGoogleClick = () => {
+    setModalError('');
     if (onError) onError('');
-
-    try {
-      // 1. Try Supabase Google OAuth
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-        },
-      });
-
-      if (error) {
-        console.warn('Supabase OAuth notice:', error.message);
-        // Fallback to Google Account modal if OAuth is not enabled in dashboard yet
-        setShowModal(true);
-      } else if (data?.url) {
-        window.location.href = data.url;
-        return;
-      }
-    } catch (err) {
-      console.warn('Supabase OAuth exception:', err);
-      setShowModal(true);
-    } finally {
-      setLoading(false);
-    }
+    setShowModal(true);
   };
 
-  const handleModalSubmit = async (e) => {
-    e.preventDefault();
-    if (!modalForm.email) return;
+  const authenticateAccount = async (accountName, accountEmail) => {
+    if (!accountEmail) return;
 
     setLoading(true);
     setModalError('');
 
     try {
-      const res = await api.auth.google({
-        email: modalForm.email.trim(),
-        name: modalForm.name.trim() || modalForm.email.split('@')[0],
+      const email = accountEmail.trim();
+      const name = (accountName && accountName.trim()) || email.split('@')[0];
+      const avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name || email)}`;
+
+      const res = await loginWithGoogle({
+        email,
+        name,
+        avatar,
         googleId: `google_${Date.now()}`,
-        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(modalForm.name || modalForm.email)}`,
       });
 
-      if (res.require2FA) {
+      if (res?.require2FA) {
         setShowModal(false);
         if (onRequire2FA) {
           onRequire2FA({ tempToken: res.tempToken, email: res.email });
@@ -72,16 +52,26 @@ export function GoogleAuthButton({
       }
 
       setShowModal(false);
-      if (onSuccess) onSuccess(res.user);
+      if (onSuccess) {
+        onSuccess(res);
+      }
     } catch (err) {
       setModalError(err.message || 'Failed to authenticate with Google.');
     } finally {
       setLoading(false);
+      setQuickLoadingEmail(null);
     }
   };
 
-  const selectQuickAccount = (name, email) => {
-    setModalForm({ name, email });
+  const handleQuickSelect = async (name, email) => {
+    setQuickLoadingEmail(email);
+    await authenticateAccount(name, email);
+  };
+
+  const handleModalSubmit = async (e) => {
+    e.preventDefault();
+    if (!modalForm.email) return;
+    await authenticateAccount(modalForm.name, modalForm.email);
   };
 
   return (
@@ -172,30 +162,42 @@ export function GoogleAuthButton({
               <div className="grid grid-cols-1 gap-2">
                 <button
                   type="button"
-                  onClick={() => selectQuickAccount('Platform Admin (Google)', 'link4emmy@gmail.com')}
-                  className="flex items-center gap-3 rounded-xl border border-[#e4e1d6] p-2.5 text-left text-xs transition hover:border-[#009689] hover:bg-[#e6f4f2]/40 dark:border-white/10 dark:hover:bg-white/5"
+                  disabled={loading}
+                  onClick={() => handleQuickSelect('Platform Admin', 'link4emmy@gmail.com')}
+                  className="flex items-center justify-between rounded-xl border border-[#e4e1d6] p-2.5 text-left text-xs transition hover:border-[#009689] hover:bg-[#e6f4f2]/40 disabled:opacity-50 dark:border-white/10 dark:hover:bg-white/5"
                 >
-                  <div className="grid h-8 w-8 place-items-center rounded-full bg-[#009689] font-bold text-white text-xs shrink-0">
-                    P
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="grid h-8 w-8 place-items-center rounded-full bg-[#009689] font-bold text-white text-xs shrink-0">
+                      P
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-[#0b1619] dark:text-white truncate">Platform Admin</p>
+                      <p className="text-[#6b7a77] dark:text-white/50 text-[11px] truncate">link4emmy@gmail.com</p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-[#0b1619] dark:text-white truncate">Platform Admin</p>
-                    <p className="text-[#6b7a77] dark:text-white/50 text-[11px] truncate">link4emmy@gmail.com</p>
-                  </div>
+                  {quickLoadingEmail === 'link4emmy@gmail.com' && (
+                    <Loader2 size={16} className="animate-spin text-[#009689] shrink-0 mr-1" />
+                  )}
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => selectQuickAccount('Emma Reader', 'emma.reader@gmail.com')}
-                  className="flex items-center gap-3 rounded-xl border border-[#e4e1d6] p-2.5 text-left text-xs transition hover:border-[#009689] hover:bg-[#e6f4f2]/40 dark:border-white/10 dark:hover:bg-white/5"
+                  disabled={loading}
+                  onClick={() => handleQuickSelect('Emma Reader', 'emma.reader@gmail.com')}
+                  className="flex items-center justify-between rounded-xl border border-[#e4e1d6] p-2.5 text-left text-xs transition hover:border-[#009689] hover:bg-[#e6f4f2]/40 disabled:opacity-50 dark:border-white/10 dark:hover:bg-white/5"
                 >
-                  <div className="grid h-8 w-8 place-items-center rounded-full bg-[#4285F4] font-bold text-white text-xs shrink-0">
-                    E
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="grid h-8 w-8 place-items-center rounded-full bg-[#4285F4] font-bold text-white text-xs shrink-0">
+                      E
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-semibold text-[#0b1619] dark:text-white truncate">Emma Reader</p>
+                      <p className="text-[#6b7a77] dark:text-white/50 text-[11px] truncate">emma.reader@gmail.com</p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="font-semibold text-[#0b1619] dark:text-white truncate">Emma Reader</p>
-                    <p className="text-[#6b7a77] dark:text-white/50 text-[11px] truncate">emma.reader@gmail.com</p>
-                  </div>
+                  {quickLoadingEmail === 'emma.reader@gmail.com' && (
+                    <Loader2 size={16} className="animate-spin text-[#4285F4] shrink-0 mr-1" />
+                  )}
                 </button>
               </div>
             </div>
