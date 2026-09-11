@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -17,6 +17,7 @@ import { AppShell } from '../components/AppShell';
 import { BookCard } from '../components/BookCard';
 import {
   getCurrentUser,
+  getBooks,
   getUserBooks,
   fetchBooks,
   getProgress,
@@ -36,32 +37,50 @@ const viewButtons = [
 ];
 
 export function Library() {
-  const user = getCurrentUser();
-  const [books, setBooks] = useState([]);
+  const [user, setUser] = useState(() => getCurrentUser());
+  const [books, setBooks] = useState(() => {
+    const u = getCurrentUser();
+    return u?.id ? getUserBooks(u.id) : getBooks();
+  });
   const [query, setQuery] = useState('');
-  const [view, setView] = useState(getSettings(user?.id || '').libraryView || 'grid');
+  const [view, setView] = useState(() => getSettings(getCurrentUser()?.id || '').libraryView || 'grid');
   const [bookToDelete, setBookToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
-  const userId = user?.id;
+  const loadBooks = useCallback(async () => {
+    const activeUser = getCurrentUser() || user;
+    const activeId = activeUser?.id;
 
-  const loadBooks = async () => {
-    if (!userId) return;
-    const initial = getUserBooks(userId);
-    setBooks(initial);
+    // Load instantly from local storage cache
+    const initial = activeId ? getUserBooks(activeId) : getBooks();
+    if (initial.length > 0) {
+      setBooks(initial);
+    }
 
     try {
       const fetched = await fetchBooks();
-      setBooks(fetched);
+      if (Array.isArray(fetched) && fetched.length > 0) {
+        setBooks(activeId ? fetched.filter((b) => {
+          const owner = b.uploadedBy || b.uploaded_by;
+          return !owner || owner === activeId || owner === 'demo_user';
+        }) : fetched);
+      } else if (initial.length > 0) {
+        setBooks(initial);
+      }
     } catch (e) {
       console.warn('Could not load remote books:', e);
+      if (initial.length > 0) setBooks(initial);
     }
-  };
+  }, [user]);
 
   useEffect(() => {
+    const currentUser = getCurrentUser();
+    if (currentUser) {
+      setUser(currentUser);
+    }
     loadBooks();
-  }, [userId]);
+  }, [loadBooks]);
 
   const filtered = useMemo(
     () =>

@@ -148,14 +148,24 @@ export function AppShell({ children }) {
                 <Settings size={18} />
                 Settings
               </NavLink>
-              {user?.role === 'admin' && (
+              {user?.role === 'admin' ? (
                 <NavLink
-                  to="/admin"
+                  to="/admin/users"
                   onClick={() => setOpen(false)}
                   className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-[#009689] hover:bg-[#009689]/10 dark:text-[#5fc4b8] dark:hover:bg-[#009689]/20 transition"
                 >
                   <Shield size={18} />
-                  Admin Console
+                  Accounts & Admin
+                </NavLink>
+              ) : (
+                <NavLink
+                  to="/admin/users"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-xs font-medium text-[#667b72] hover:bg-white hover:text-[#009689] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-[#5fc4b8] transition"
+                  title="View registered accounts & admin setup"
+                >
+                  <Shield size={18} />
+                  Accounts & Admin Setup
                 </NavLink>
               )}
               <button

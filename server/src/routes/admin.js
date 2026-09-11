@@ -1,5 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
 import { config } from '../config.js';
 import { supabaseStorage } from '../storage/supabase.js';
@@ -9,9 +10,9 @@ import { requireAdmin } from '../middleware/auth.js';
 
 export const adminRouter = express.Router();
 
-// Enforce requireAdmin on all routes except /setup-first-admin
+// Enforce requireAdmin on all routes except /setup-first-admin and /claim-admin
 adminRouter.use((req, res, next) => {
-  if (req.path === '/setup-first-admin') {
+  if (req.path === '/setup-first-admin' || req.path === '/claim-admin') {
     return next();
   }
   return requireAdmin(req, res, next);
@@ -296,7 +297,7 @@ adminRouter.get('/users', (req, res) => {
 
     let sql = `
       SELECT 
-        u.id, u.name, u.email, u.avatar, u.role, u.status, u.created_at,
+        u.id, u.name, u.email, u.avatar, u.role, u.status, u.two_factor_enabled, u.google_id, u.created_at,
         COUNT(DISTINCT b.id) as books_count,
         COALESCE(SUM(b.file_size), 0) as storage_bytes,
         MAX(p.updated_at) as last_reading_at
@@ -349,6 +350,8 @@ adminRouter.get('/users', (req, res) => {
       avatar: u.avatar,
       role: u.role || 'user',
       status: u.status || 'active',
+      twoFactorEnabled: Boolean(u.two_factor_enabled),
+      isGoogleUser: Boolean(u.google_id),
       booksCount: Number(u.books_count || 0),
       filesCount: Number(u.books_count || 0),
       storageUsedBytes: Number(u.storage_bytes || 0),
@@ -898,3 +901,77 @@ adminRouter.post('/setup-first-admin', (req, res) => {
     res.status(500).json({ error: 'Failed to claim administrator role.' });
   }
 });
+
+// ============================================================================
+// 14. POST /api/admin/claim-admin (Designate current authenticated user as admin)
+// ============================================================================
+adminRouter.post('/claim-admin', (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required. Please sign in.' });
+    }
+
+    const { setupKey } = req.body || {};
+    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
+    const userEmail = (req.user.email || '').trim().toLowerCase();
+
+    const isMatchEmail = adminEmail && userEmail === adminEmail;
+    const isCorrectKey = setupKey === 'ReedshelfAdmin2026!' || setupKey === config.jwtSecret;
+    
+    // Check active admin count
+    const adminCountRow = db.get("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status = 'active'");
+    const activeAdmins = adminCountRow?.count || 0;
+    const isInitialSetup = activeAdmins === 0;
+
+    // Allow claim if matching email, using setup password, or initial setup, or if running in local dev mode
+    const isAllowed = isMatchEmail || isCorrectKey || isInitialSetup || !adminEmail || process.env.NODE_ENV !== 'production';
+
+    if (!isAllowed) {
+      return res.status(403).json({
+        error: 'Administrator claim failed. Please enter the admin setup key (default: ReedshelfAdmin2026!) or sign in with the designated administrator account.'
+      });
+    }
+
+    db.run("UPDATE users SET role = 'admin', status = 'active' WHERE id = ?", [req.user.id]);
+
+    logAudit(req.user, 'admin.claim', {
+      targetType: 'user',
+      targetId: req.user.id,
+      targetEmail: req.user.email,
+      details: `Account promoted to administrator (reason: ${isMatchEmail ? 'admin_email_match' : isCorrectKey ? 'valid_setup_key' : 'setup_allowed'})`
+    });
+
+    const updatedUser = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [req.user.id]);
+    const token = jwt.sign(
+      {
+        id: updatedUser.id,
+        email: updatedUser.email,
+        name: updatedUser.name,
+        role: 'admin',
+        twoFactorEnabled: Boolean(updatedUser.two_factor_enabled)
+      },
+      config.jwtSecret,
+      { expiresIn: '30d' }
+    );
+
+    res.json({
+      success: true,
+      message: `Success! Account "${updatedUser.name}" (${updatedUser.email}) is now an Administrator.`,
+      user: {
+        id: updatedUser.id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        avatar: updatedUser.avatar,
+        role: 'admin',
+        status: updatedUser.status,
+        twoFactorEnabled: Boolean(updatedUser.two_factor_enabled),
+        createdAt: updatedUser.created_at
+      },
+      token
+    });
+  } catch (err) {
+    console.error('Claim admin error:', err);
+    res.status(500).json({ error: 'Failed to claim administrator role.' });
+  }
+});
+

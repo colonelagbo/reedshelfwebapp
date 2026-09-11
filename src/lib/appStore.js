@@ -30,6 +30,16 @@ export const getCurrentUser = () => {
   return getUsers().find((u) => u.id === session) || null;
 };
 
+export const setCurrentUser = (user) => {
+  if (user) {
+    authStorage.setUser(user);
+    localStorage.setItem(SESSION_KEY, user.id);
+  } else {
+    authStorage.clear();
+    localStorage.removeItem(SESSION_KEY);
+  }
+};
+
 export async function registerUser({ name, email, password }) {
   try {
     const res = await api.auth.register({ name, email, password });
@@ -58,6 +68,9 @@ export async function registerUser({ name, email, password }) {
 export async function loginUser({ email, password }) {
   try {
     const res = await api.auth.login({ email, password });
+    if (res.require2FA) {
+      return res; // Signal that 2FA Authenticator code is needed
+    }
     return res.user;
   } catch (err) {
     // Fallback locally
@@ -69,6 +82,41 @@ export async function loginUser({ email, password }) {
     authStorage.setUser(user);
     return user;
   }
+}
+
+export async function loginWithGoogle({ email, name, avatar, googleId }) {
+  try {
+    const res = await api.auth.google({ email, name, avatar, googleId });
+    if (res.require2FA) {
+      return res;
+    }
+    return res.user;
+  } catch (err) {
+    // Fallback locally
+    const users = getUsers();
+    let user = users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
+    if (!user) {
+      user = {
+        id: uid('user'),
+        name: name || 'Google User',
+        email: email.trim().toLowerCase(),
+        password: '',
+        google_id: googleId || `google_${Date.now()}`,
+        avatar: avatar || null,
+        role: 'user',
+        createdAt: new Date().toISOString(),
+      };
+      write(USERS_KEY, [...users, user]);
+    }
+    localStorage.setItem(SESSION_KEY, user.id);
+    authStorage.setUser(user);
+    return user;
+  }
+}
+
+export async function verify2FALogin({ tempToken, code }) {
+  const res = await api.auth.verify2FA({ tempToken, code });
+  return res.user;
 }
 
 export function logoutUser() {
@@ -109,14 +157,20 @@ export const getBooks = () => read(BOOKS_KEY, []);
 export const getUserBooks = (userId) => {
   const books = getBooks();
   if (!userId) return books;
-  return books.filter((b) => b.uploadedBy === userId || !b.uploadedBy);
+  return books.filter((b) => {
+    const owner = b.uploadedBy || b.uploaded_by;
+    return !owner || owner === userId || owner === 'demo_user';
+  });
 };
 
 export async function fetchBooks() {
   try {
     const books = await api.books.list();
-    write(BOOKS_KEY, books);
-    return books;
+    if (Array.isArray(books)) {
+      write(BOOKS_KEY, books);
+      return books;
+    }
+    return getBooks();
   } catch (err) {
     console.warn('Could not fetch books from backend, using local store:', err.message);
     return getBooks();
@@ -124,7 +178,12 @@ export async function fetchBooks() {
 }
 
 export async function uploadBookFile(file, metadata) {
-  return await api.books.upload(file, metadata);
+  const res = await api.books.upload(file, metadata);
+  if (res && res.id) {
+    const current = getBooks();
+    write(BOOKS_KEY, [res, ...current.filter((b) => b.id !== res.id)]);
+  }
+  return res;
 }
 export const uploadBookFileToCloudflare = uploadBookFile;
 

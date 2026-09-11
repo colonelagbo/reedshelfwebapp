@@ -115,6 +115,50 @@ export const api = {
       });
     },
 
+    async google({ email, name, avatar, googleId }) {
+      const res = await apiRequest('/api/auth/google', {
+        method: 'POST',
+        body: JSON.stringify({ email, name, avatar, googleId }),
+      });
+      if (res.token) authStorage.setToken(res.token);
+      if (res.user) authStorage.setUser(res.user);
+      return res;
+    },
+
+    async verify2FA({ tempToken, code }) {
+      const res = await apiRequest('/api/auth/2fa/verify', {
+        method: 'POST',
+        body: JSON.stringify({ tempToken, code }),
+      });
+      if (res.token) authStorage.setToken(res.token);
+      if (res.user) authStorage.setUser(res.user);
+      return res;
+    },
+
+    async setup2FA() {
+      return await apiRequest('/api/auth/2fa/setup');
+    },
+
+    async enable2FA({ secret, code }) {
+      const res = await apiRequest('/api/auth/2fa/enable', {
+        method: 'POST',
+        body: JSON.stringify({ secret, code }),
+      });
+      if (res.token) authStorage.setToken(res.token);
+      if (res.user) authStorage.setUser(res.user);
+      return res;
+    },
+
+    async disable2FA({ code, password } = {}) {
+      const res = await apiRequest('/api/auth/2fa/disable', {
+        method: 'POST',
+        body: JSON.stringify({ code, password }),
+      });
+      if (res.token) authStorage.setToken(res.token);
+      if (res.user) authStorage.setUser(res.user);
+      return res;
+    },
+
     logout() {
       authStorage.clearToken();
     },
@@ -320,6 +364,16 @@ export const api = {
       return await apiRequest('/api/admin/setup-first-admin', {
         method: 'POST',
       });
+    },
+
+    async claimAdmin({ setupKey } = {}) {
+      const res = await apiRequest('/api/admin/claim-admin', {
+        method: 'POST',
+        body: JSON.stringify({ setupKey }),
+      });
+      if (res.token) authStorage.setToken(res.token);
+      if (res.user) authStorage.setUser(res.user);
+      return res;
     },
   },
 };

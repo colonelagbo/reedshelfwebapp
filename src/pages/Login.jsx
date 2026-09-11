@@ -3,14 +3,21 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '../components/AuthLayout';
 import { loginUser } from '../lib/appStore';
 import { Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { GoogleAuthButton } from '../components/GoogleAuthButton';
+import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
 
 export function Login() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [twoFactorData, setTwoFactorData] = useState(null); // { tempToken, email }
   const navigate = useNavigate();
   const location = useLocation();
+
+  const handleAuthSuccess = (user) => {
+    navigate(location.state?.from || '/app/home', { replace: true });
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -18,8 +25,12 @@ export function Login() {
     setLoading(true);
 
     try {
-      await loginUser(form);
-      navigate(location.state?.from || '/app/home', { replace: true });
+      const res = await loginUser(form);
+      if (res?.require2FA) {
+        setTwoFactorData({ tempToken: res.tempToken, email: res.email || form.email });
+        return;
+      }
+      handleAuthSuccess(res);
     } catch (err) {
       setError(err.message || 'Failed to sign in. Please check your credentials.');
     } finally {
@@ -137,8 +148,8 @@ export function Login() {
           )}
         </button>
 
-        {/* Facebook-style Divider */}
-        <div className="relative my-5 flex items-center justify-center pt-1">
+        {/* Divider */}
+        <div className="relative my-4 flex items-center justify-center pt-1">
           <div className="absolute inset-0 flex items-center">
             <div className="w-full border-t border-[#e4e1d6] dark:border-white/10" />
           </div>
@@ -147,8 +158,17 @@ export function Login() {
           </span>
         </div>
 
-        {/* Facebook-style Create Account Button */}
-        <div>
+        {/* Google Sign-In Button */}
+        <GoogleAuthButton
+          mode="signin"
+          onSuccess={handleAuthSuccess}
+          onRequire2FA={(data) => setTwoFactorData(data)}
+          onError={(err) => setError(err)}
+          disabled={loading}
+        />
+
+        {/* Create Account Button */}
+        <div className="pt-2">
           <Link
             to="/register"
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#063b5c] py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#0a4d74] dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
@@ -157,6 +177,16 @@ export function Login() {
           </Link>
         </div>
       </form>
+
+      {/* 2FA Verification Modal */}
+      {twoFactorData && (
+        <TwoFactorVerifyModal
+          tempToken={twoFactorData.tempToken}
+          email={twoFactorData.email}
+          onSuccess={handleAuthSuccess}
+          onCancel={() => setTwoFactorData(null)}
+        />
+      )}
     </AuthLayout>
   );
 }

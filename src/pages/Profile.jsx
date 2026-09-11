@@ -1,10 +1,37 @@
 import { useEffect, useState } from 'react';
-import { BookOpen, CalendarDays, Mail, Camera, Lock, Save, UserCircle, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import {
+  BookOpen,
+  CalendarDays,
+  Mail,
+  Camera,
+  Lock,
+  Save,
+  UserCircle,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  ShieldCheck,
+  Shield,
+  Key,
+  ArrowRight
+} from 'lucide-react';
 import { AppShell } from '../components/AppShell';
-import { getCurrentUser, getUserBooks, getUserPlans, updateUser, fetchBooks, fetchPlans, api } from '../lib/appStore';
+import {
+  getCurrentUser,
+  getUserBooks,
+  getUserPlans,
+  updateUser,
+  fetchBooks,
+  fetchPlans,
+  setCurrentUser,
+  api
+} from '../lib/appStore';
+import { TwoFactorSetupModal } from '../components/TwoFactorSetupModal';
 
 export function Profile() {
   const user = getCurrentUser();
+  const [currentUserData, setCurrentUserData] = useState(user);
   const [books, setBooks] = useState([]);
   const [plans, setPlans] = useState([]);
   const [name, setName] = useState(user?.name || '');
@@ -15,6 +42,10 @@ export function Profile() {
   const [error, setError] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
   const [changingPass, setChangingPass] = useState(false);
+  const [show2FASetup, setShow2FASetup] = useState(false);
+  const [disabling2FA, setDisabling2FA] = useState(false);
+  const [setupKey, setSetupKey] = useState('');
+  const [claimingAdmin, setClaimingAdmin] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -23,7 +54,54 @@ export function Profile() {
 
     fetchBooks().then((b) => b && setBooks(b)).catch(() => {});
     fetchPlans().then((p) => p && setPlans(p)).catch(() => {});
+
+    api.auth.getMe().then((res) => {
+      if (res?.user) {
+        setCurrentUserData(res.user);
+        setCurrentUser(res.user);
+      }
+    }).catch(() => {});
   }, [user?.id]);
+
+  const handleDisable2FA = async () => {
+    if (!window.confirm('Are you sure you want to disable 2-Factor Authentication?')) return;
+    setDisabling2FA(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await api.auth.disable2FA();
+      if (res.user) {
+        setCurrentUserData(res.user);
+        setCurrentUser(res.user);
+      }
+      setMessage('Two-Factor Authentication has been disabled.');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setError(err.message || 'Failed to disable 2FA.');
+    } finally {
+      setDisabling2FA(false);
+    }
+  };
+
+  const handleClaimAdmin = async (e) => {
+    e.preventDefault();
+    setClaimingAdmin(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await api.admin.claimAdmin({ setupKey: setupKey.trim() });
+      if (res.user) {
+        setCurrentUserData(res.user);
+        setCurrentUser(res.user);
+      }
+      setMessage(res.message || 'Platform administrator privileges granted!');
+      setTimeout(() => setMessage(''), 3000);
+    } catch (err) {
+      setError(err.message || 'Failed to claim administrator access.');
+    } finally {
+      setClaimingAdmin(false);
+    }
+  };
 
   const saveProfile = async () => {
     if (!user?.id) return;
@@ -195,6 +273,116 @@ export function Profile() {
             </button>
           </section>
 
+          {/* Two-Factor Authenticator Card */}
+          <section className="rounded-3xl border border-[#e4e1d6] bg-white p-6 dark:border-white/10 dark:bg-[#142326] sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8] shrink-0">
+                  <ShieldCheck size={20} />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-bold text-lg">Two-Factor Authenticator (TOTP)</h2>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                        currentUserData?.two_factor_enabled
+                          ? 'bg-[#dcfce7] text-[#166534] dark:bg-[#052e16] dark:text-[#86efac]'
+                          : 'bg-black/5 text-[#6b7a77] dark:bg-white/10 dark:text-white/60'
+                      }`}
+                    >
+                      {currentUserData?.two_factor_enabled ? 'Enabled (Active)' : 'Disabled'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60 leading-relaxed">
+                    Protect your account with a time-based 6-digit verification code from Google Authenticator, Microsoft Authenticator, or 1Password.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              {currentUserData?.two_factor_enabled ? (
+                <button
+                  onClick={handleDisable2FA}
+                  disabled={disabling2FA}
+                  className="inline-flex items-center gap-2 rounded-xl border border-[#fecaca] bg-white px-5 py-2.5 text-xs font-semibold text-[#dc2626] transition hover:bg-[#fee2e2] disabled:opacity-50 dark:border-[#7f1d1d] dark:bg-[#142326] dark:hover:bg-[#450a0a]"
+                >
+                  {disabling2FA ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
+                  Disable Authenticator
+                </button>
+              ) : (
+                <button
+                  onClick={() => setShow2FASetup(true)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268]"
+                >
+                  <ShieldCheck size={15} />
+                  Set Up Authenticator App
+                </button>
+              )}
+            </div>
+          </section>
+
+          {/* Admin Console & Accounts Access */}
+          <section className="rounded-3xl border border-[#e4e1d6] bg-white p-6 dark:border-white/10 dark:bg-[#142326] sm:p-8">
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fef3c7] text-[#92400e] dark:bg-[#451a03] dark:text-[#fcd34d] shrink-0">
+                <Shield size={20} />
+              </span>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <h2 className="font-bold text-lg">Platform Administration</h2>
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                      currentUserData?.role === 'admin'
+                        ? 'bg-[#fef3c7] text-[#92400e] dark:bg-[#451a03] dark:text-[#fcd34d]'
+                        : 'bg-black/5 text-[#6b7a77] dark:bg-white/10 dark:text-white/60'
+                    }`}
+                  >
+                    {currentUserData?.role === 'admin' ? 'Administrator' : 'Standard User'}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60 leading-relaxed">
+                  View and manage all registered user accounts, track storage allocations, and inspect reading analytics.
+                </p>
+
+                {currentUserData?.role === 'admin' ? (
+                  <div className="mt-4">
+                    <Link
+                      to="/admin/users"
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268]"
+                    >
+                      <span>View All Accounts in Admin Console</span>
+                      <ArrowRight size={14} />
+                    </Link>
+                  </div>
+                ) : (
+                  <form onSubmit={handleClaimAdmin} className="mt-4 max-w-md space-y-2.5">
+                    <p className="text-[11px] text-[#6b7a77] dark:text-white/50">
+                      To view all registered accounts, claim the administrator role below:
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        placeholder="Setup key (e.g. ReedshelfAdmin2026!)"
+                        value={setupKey}
+                        onChange={(e) => setSetupKey(e.target.value)}
+                        className="flex-1 rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] px-3 py-2 text-xs outline-none focus:border-[#009689] dark:border-white/10 dark:bg-white/5 dark:text-white"
+                      />
+                      <button
+                        type="submit"
+                        disabled={claimingAdmin}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268] disabled:opacity-50 shrink-0"
+                      >
+                        {claimingAdmin ? <Loader2 size={14} className="animate-spin" /> : <Key size={14} />}
+                        <span>Claim Admin</span>
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </div>
+          </section>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl bg-[#f6f4ee] p-5 dark:bg-white/5">
               <BookOpen className="text-[#009689]" />
@@ -209,6 +397,22 @@ export function Profile() {
           </div>
         </div>
       </div>
+
+      {show2FASetup && (
+        <TwoFactorSetupModal
+          isOpen={show2FASetup}
+          onClose={() => setShow2FASetup(false)}
+          onSuccess={(updatedUser) => {
+            setShow2FASetup(false);
+            if (updatedUser) {
+              setCurrentUserData(updatedUser);
+              setCurrentUser(updatedUser);
+            }
+            setMessage('Two-Factor Authentication is now enabled!');
+            setTimeout(() => setMessage(''), 3000);
+          }}
+        />
+      )}
     </AppShell>
   );
 }

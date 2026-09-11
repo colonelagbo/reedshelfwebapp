@@ -11,6 +11,7 @@ import { Profile } from "./pages/Profile";
 import { Settings } from "./pages/Settings";
 import { NotFound } from "./pages/NotFound";
 import { ProtectedRoute } from "./pages/ProtectedRoute";
+import { AuthCallback } from "./pages/AuthCallback";
 import { getCurrentUser } from "./lib/appStore";
 
 // Admin Console Imports
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/login" element={<Navigate to="/sign-in" replace />} />
         <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
         <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
+        <Route path="/auth/callback" element={<AuthCallback />} />
         
         {/* User Application Shell */}
         <Route path="/app" element={<Navigate to="/app/home" replace />} />

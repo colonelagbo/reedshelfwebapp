@@ -113,8 +113,8 @@ export function Upload() {
       const coverDataUrl = extractedInfo?.coverDataUrl || null;
 
       let book;
+      const currentUser = getCurrentUser();
       try {
-        // Upload to Cloudflare R2 backend
         book = await uploadBookFileToCloudflare(file, {
           title,
           author,
@@ -129,14 +129,16 @@ export function Upload() {
           fileName: file.name,
           fileType: file.type || 'application/pdf',
           size: file.size,
-          uploadedBy: user?.id || 'demo_user',
+          uploadedBy: currentUser?.id || user?.id || 'demo_user',
           totalPages,
           coverDataUrl,
         });
       }
 
       // Cache locally in IndexedDB/memory for instantaneous reader opening
-      await saveBookFile(book.id, file);
+      if (book?.id) {
+        await saveBookFile(book.id, file);
+      }
       navigate('/app/library');
     } catch (err) {
       console.error('Error saving book:', err);

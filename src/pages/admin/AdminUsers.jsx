@@ -19,7 +19,8 @@ import {
   Calendar,
   HardDrive,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  ShieldCheck
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { getCurrentUser } from '../../lib/appStore';
@@ -275,11 +276,27 @@ export function AdminUsers() {
                             )}
                           </div>
                           <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <p className="font-semibold text-[#0b1619] dark:text-white truncate">{u.name}</p>
                               {isSelf && (
                                 <span className="rounded-md bg-[#009689]/10 px-1.5 py-0.2 text-[10px] font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
                                   You
+                                </span>
+                              )}
+                              {u.twoFactorEnabled && (
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded-md bg-[#009689]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]"
+                                  title="2-Factor Authenticator Active"
+                                >
+                                  <ShieldCheck size={11} /> 2FA
+                                </span>
+                              )}
+                              {u.isGoogleUser && (
+                                <span
+                                  className="inline-flex items-center gap-0.5 rounded-md bg-[#4285F4]/10 px-1.5 py-0.5 text-[10px] font-bold text-[#1d4ed8] dark:bg-[#4285F4]/20 dark:text-[#93c5fd]"
+                                  title="Google Account"
+                                >
+                                  Google
                                 </span>
                               )}
                             </div>
@@ -488,6 +505,23 @@ export function AdminUsers() {
                 <p className="text-lg font-bold text-[#0b1619] dark:text-white mt-0.5">
                   {selectedUser.user.highlightsCount}
                 </p>
+              </div>
+            </div>
+
+            {/* Security & Auth Details */}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <div className="flex items-center gap-1.5 rounded-lg border border-[#e4e1d6] bg-[#fbfcf9] px-3 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.02]">
+                <ShieldCheck size={14} className={selectedUser.user.twoFactorEnabled ? "text-[#009689]" : "text-[#8b9a93]"} />
+                <span className="font-semibold text-[#0b1619] dark:text-white">Authenticator (2FA):</span>
+                <span className={selectedUser.user.twoFactorEnabled ? "text-[#009689] font-bold" : "text-[#8b9a93]"}>
+                  {selectedUser.user.twoFactorEnabled ? 'Enabled (Active)' : 'Not Enabled'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 rounded-lg border border-[#e4e1d6] bg-[#fbfcf9] px-3 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.02]">
+                <span className="font-semibold text-[#0b1619] dark:text-white">Account Type:</span>
+                <span className="text-[#0b1619] dark:text-white font-medium">
+                  {selectedUser.user.isGoogleUser ? 'Google OAuth Account' : 'Standard Password Account'}
+                </span>
               </div>
             </div>
 

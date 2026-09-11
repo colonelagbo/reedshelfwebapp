@@ -19,9 +19,9 @@ export function authenticateToken(req, res, next) {
     const payload = jwt.verify(token, config.jwtSecret);
     
     // Find user by ID or by email in current container DB
-    let user = db.get('SELECT id, name, email, avatar, role, status, created_at FROM users WHERE id = ?', [payload.id]);
+    let user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [payload.id]);
     if (!user && payload.email) {
-      user = db.get('SELECT id, name, email, avatar, role, status, created_at FROM users WHERE LOWER(email) = ?', [payload.email.toLowerCase()]);
+      user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE LOWER(email) = ?', [payload.email.toLowerCase()]);
     }
 
     // In serverless environments, if a new container started up and doesn't have the user cached yet,
@@ -72,9 +72,9 @@ export function optionalToken(req, res, next) {
   if (token) {
     try {
       const payload = jwt.verify(token, config.jwtSecret);
-      let user = db.get('SELECT id, name, email, avatar, role, status, created_at FROM users WHERE id = ?', [payload.id]);
+      let user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [payload.id]);
       if (!user && payload.email) {
-        user = db.get('SELECT id, name, email, avatar, role, status, created_at FROM users WHERE LOWER(email) = ?', [payload.email.toLowerCase()]);
+        user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE LOWER(email) = ?', [payload.email.toLowerCase()]);
       }
       if (user && user.status !== 'suspended') {
         req.user = user;

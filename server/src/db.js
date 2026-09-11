@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS users (
   avatar TEXT,
   role TEXT DEFAULT 'user',
   status TEXT DEFAULT 'active',
+  two_factor_enabled INTEGER DEFAULT 0,
+  two_factor_secret TEXT,
+  google_id TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -173,6 +176,14 @@ class JsonStoreAdapter {
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf-8');
         this.data = { ...this.data, ...JSON.parse(raw) };
+        if (Array.isArray(this.data.users)) {
+          this.data.users = this.data.users.map((u) => ({
+            ...u,
+            two_factor_enabled: Boolean(u.two_factor_enabled || false),
+            two_factor_secret: u.two_factor_secret || null,
+            google_id: u.google_id || null,
+          }));
+        }
       }
     } catch (e) {
       console.warn('[DB Fallback] Could not read JSON DB file, starting fresh:', e.message);
@@ -286,6 +297,8 @@ function queryFallback(sql, params, mode) {
           role: u.role || 'user',
           status: u.status || 'active',
           created_at: u.created_at,
+          two_factor_enabled: Boolean(u.two_factor_enabled),
+          google_id: u.google_id || null,
           books_count: userBooks.length,
           storage_bytes: storageBytes,
           last_reading_at: lastReading?.updated_at || null
@@ -446,12 +459,14 @@ function queryFallback(sql, params, mode) {
 
     // Filter clauses
     if (lower.includes('where')) {
-      if (lower.includes('email =') && params.length >= 1) {
-        results = results.filter(u => u.email?.toLowerCase() === String(params[0]).toLowerCase());
+      if ((lower.includes('email =') || lower.includes('email) =')) && params.length >= 1) {
+        results = results.filter(u => (u.email || '').toLowerCase() === String(params[0]).toLowerCase());
       } else if (lower.includes('key =') && params.length >= 1) {
         results = results.filter(s => s.key === params[0]);
       } else if (lower.includes('user_id =') && lower.includes('book_id =') && params.length >= 2) {
         results = results.filter(r => r.user_id === params[0] && r.book_id === params[1]);
+      } else if (lower.includes('id =') && lower.includes('uploaded_by =') && params.length >= 2) {
+        results = results.filter(b => b.id === params[0] && b.uploaded_by === params[1]);
       } else if (lower.includes('uploaded_by =') && params.length >= 1) {
         results = results.filter(b => b.uploaded_by === params[0]);
       } else if (lower.includes('user_id =') && params.length >= 1) {
@@ -460,6 +475,8 @@ function queryFallback(sql, params, mode) {
         results = results.filter(r => r.book_id === params[0]);
       } else if (lower.includes('id =') && params.length >= 1) {
         results = results.filter(r => r.id === params[0]);
+      } else if (lower.includes('google_id =') && params.length >= 1) {
+        results = results.filter(u => u.google_id === params[0]);
       }
     }
 
@@ -493,8 +510,20 @@ function queryFallback(sql, params, mode) {
 
     if (target) {
       if (lower.includes('into users')) {
-        const [id, name, email, password, avatar, role, status, created_at] = params;
-        target.push({ id, name, email, password, avatar, role: role || 'user', status: status || 'active', created_at });
+        const [id, name, email, password, avatar, role, status, created_at, two_factor_enabled, two_factor_secret, google_id] = params;
+        target.push({
+          id,
+          name,
+          email,
+          password: password || '',
+          avatar: avatar || null,
+          role: role || 'user',
+          status: status || 'active',
+          two_factor_enabled: Boolean(two_factor_enabled || false),
+          two_factor_secret: two_factor_secret || null,
+          google_id: google_id || null,
+          created_at: created_at || new Date().toISOString()
+        });
       } else if (lower.includes('into books')) {
         const [id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at] = params;
         target.unshift({ id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at });
@@ -523,18 +552,77 @@ function queryFallback(sql, params, mode) {
 
   // 3. UPDATE QUERIES
   if (lower.startsWith('update')) {
-    if (lower.includes('users') && lower.includes('set status =') && params.length >= 2) {
-      const [status, id] = params;
-      const u = jsonStore.data.users.find(x => x.id === id);
-      if (u) { u.status = status; jsonStore.save(); return { changes: 1 }; }
-    } else if (lower.includes('users') && lower.includes('set role =') && params.length >= 2) {
-      const [role, id] = params;
-      const u = jsonStore.data.users.find(x => x.id === id);
-      if (u) { u.role = role; jsonStore.save(); return { changes: 1 }; }
-    } else if (lower.includes('users') && lower.includes('set password =') && params.length >= 2) {
-      const [password, id] = params;
-      const u = jsonStore.data.users.find(x => x.id === id);
-      if (u) { u.password = password; jsonStore.save(); return { changes: 1 }; }
+    if (lower.includes('users')) {
+      const targetId = params[params.length - 1];
+      const u = jsonStore.data.users.find(x => x.id === targetId);
+      if (u) {
+        if (lower.includes("status = 'active'")) {
+          u.status = 'active';
+        } else if (lower.includes("status = 'suspended'")) {
+          u.status = 'suspended';
+        } else if (lower.includes('status = ?')) {
+          u.status = params[0];
+        }
+
+        if (lower.includes("role = 'admin'")) {
+          u.role = 'admin';
+        } else if (lower.includes("role = 'user'")) {
+          u.role = 'user';
+        } else if (lower.includes('role = ?')) {
+          u.role = params[0];
+        }
+
+        if (lower.includes('set password =') && params.length >= 2) {
+          u.password = params[0];
+        }
+        if (lower.includes('two_factor_enabled = 1') || lower.includes('two_factor_enabled = true')) {
+          u.two_factor_enabled = true;
+        } else if (lower.includes('two_factor_enabled = 0') || lower.includes('two_factor_enabled = false')) {
+          u.two_factor_enabled = false;
+        } else if (lower.includes('two_factor_enabled = ?')) {
+          u.two_factor_enabled = Boolean(params[0]);
+        }
+
+        if (lower.includes('two_factor_secret = null')) {
+          u.two_factor_secret = null;
+        } else if (lower.includes('two_factor_secret = ?')) {
+          const nonIdParams = params.slice(0, -1);
+          const secretCandidate = nonIdParams.find(p => typeof p === 'string' && p.length >= 16) || nonIdParams[0];
+          if (secretCandidate) {
+            u.two_factor_secret = secretCandidate;
+          }
+        }
+        if (lower.includes('google_id')) {
+          const g = params.find(p => typeof p === 'string' && (p.startsWith('google_') || p.length > 15));
+          if (g) u.google_id = g;
+        }
+        if (lower.includes('name =')) {
+          const nameVal = params[0];
+          if (nameVal && typeof nameVal === 'string') u.name = nameVal;
+        }
+        if (lower.includes('avatar =')) {
+          const avVal = params.find((p, i) => i < params.length - 1 && typeof p === 'string' && (p.startsWith('http') || p.startsWith('data:')));
+          if (avVal !== undefined) u.avatar = avVal;
+        }
+        jsonStore.save();
+        return { changes: 1 };
+      }
+    } else if (lower.includes('books')) {
+      const targetId = params[params.length - 1];
+      const b = jsonStore.data.books.find(x => x.id === targetId);
+      if (b) {
+        params.slice(0, -1).forEach(val => {
+          if (typeof val === 'string') {
+            if (val.startsWith('data:image') || val.startsWith('http')) b.cover_data_url = val;
+            else if (!b.title || val !== b.author) b.title = val;
+            else b.author = val;
+          } else if (typeof val === 'number') {
+            b.total_pages = val;
+          }
+        });
+        jsonStore.save();
+        return { changes: 1 };
+      }
     } else if (lower.includes('admin_settings') && lower.includes('set value =') && params.length >= 3) {
       const [value, updated_at, key] = params;
       const s = jsonStore.data.admin_settings.find(x => x.key === key);
