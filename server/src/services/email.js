@@ -11,22 +11,24 @@ export function getTransporter() {
   const rawPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '';
   const pass = rawPass.replace(/\s+/g, '').trim();
 
-  if (host && user && pass) {
-    cachedTransporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465 || process.env.SMTP_SECURE === 'true',
-      auth: { user, pass }
-    });
-    return cachedTransporter;
-  }
+  if (user && pass) {
+    if (host === 'smtp.gmail.com' || user.endsWith('@gmail.com') || (!host && user)) {
+      cachedTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user, pass }
+      });
+      return cachedTransporter;
+    }
 
-  if (user && pass && !host) {
-    cachedTransporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: { user, pass }
-    });
-    return cachedTransporter;
+    if (host) {
+      cachedTransporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465 || process.env.SMTP_SECURE === 'true',
+        auth: { user, pass }
+      });
+      return cachedTransporter;
+    }
   }
 
   return null;
