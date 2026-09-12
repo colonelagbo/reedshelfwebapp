@@ -157,11 +157,11 @@ export function TwoFactorSetupModal({
               </p>
 
               <div className="flex justify-center">
-                <div className="rounded-2xl border border-[#e4e1d6] bg-white p-3 shadow-xs dark:border-white/15">
+                <div className="rounded-2xl border border-[#e4e1d6] bg-white p-2.5 sm:p-3 shadow-xs dark:border-white/15">
                   <img
                     src={configData?.qrCodeUrl}
                     alt="Authenticator QR Code"
-                    className="h-44 w-44 rounded-xl object-contain"
+                    className="h-36 w-36 sm:h-44 sm:w-44 rounded-xl object-contain"
                   />
                 </div>
               </div>
@@ -179,7 +179,7 @@ export function TwoFactorSetupModal({
                 <button
                   type="button"
                   onClick={handleCopySecret}
-                  className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0b1619] shadow-2xs border border-[#e4e1d6] hover:bg-[#f6f4ee] dark:border-white/10 dark:bg-white/10 dark:text-white"
+                  className="inline-flex min-h-[36px] items-center gap-1 rounded-lg bg-white px-3 py-1 text-[11px] font-semibold text-[#0b1619] shadow-2xs border border-[#e4e1d6] hover:bg-[#f6f4ee] dark:border-white/10 dark:bg-white/10 dark:text-white touch-manipulation"
                 >
                   {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
                   <span>{copied ? 'Copied' : 'Copy'}</span>
@@ -205,7 +205,7 @@ export function TwoFactorSetupModal({
                 <button
                   type="submit"
                   disabled={verifying || code.length !== 6}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268] disabled:opacity-40 shrink-0"
+                  className="inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268] disabled:opacity-40 shrink-0 touch-manipulation"
                 >
                   {verifying ? (
                     <Loader2 size={15} className="animate-spin" />
@@ -224,7 +224,7 @@ export function TwoFactorSetupModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-xl border border-[#d5ddd1] px-4 py-2 text-xs font-semibold text-[#6b7a77] hover:bg-[#f6f4ee] dark:border-white/15 dark:text-white/70"
+              className="min-h-[40px] rounded-xl border border-[#d5ddd1] px-4 py-2 text-xs font-semibold text-[#6b7a77] hover:bg-[#f6f4ee] dark:border-white/15 dark:text-white/70 touch-manipulation"
             >
               {isMandatory ? 'Skip for now' : 'Cancel'}
             </button>

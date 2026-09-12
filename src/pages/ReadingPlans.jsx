@@ -147,17 +147,17 @@ export function ReadingPlans() {
     <AppShell>
       <div className="mx-auto max-w-5xl">
         {/* Page Header */}
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
-            <h1 className="text-3xl font-bold">Reading Plans</h1>
-            <p className="mt-1 text-[#6b7a77] dark:text-white/60">
+            <h1 className="text-2xl font-bold sm:text-3xl">Reading Plans</h1>
+            <p className="mt-1 text-xs text-[#6b7a77] sm:text-sm dark:text-white/60">
               Set how many days you want to read a book, and ReedShelf calculates your daily targets.
             </p>
           </div>
           {books.length > 0 && (
             <button
               onClick={() => setOpen(true)}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268]"
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] touch-manipulation"
             >
               <Plus size={18} /> Create a plan
             </button>
@@ -166,15 +166,15 @@ export function ReadingPlans() {
 
         {/* Create Plan Section / Modal Form */}
         {open && (
-          <div className="mt-7 rounded-3xl border border-[#e4e1d6] bg-white p-6 shadow-sm dark:border-white/10 dark:bg-[#142326] sm:p-8">
+          <div className="mt-5 rounded-3xl border border-[#e4e1d6] bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#142326] sm:mt-7 sm:p-8">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
-                  <Sparkles size={24} />
+                <span className="grid h-11 w-11 sm:h-12 sm:w-12 place-items-center rounded-2xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                  <Sparkles size={22} />
                 </span>
                 <div>
-                  <h2 className="text-xl font-bold">Create a Reading Plan</h2>
-                  <p className="text-sm text-[#6b7a77] dark:text-white/60">
+                  <h2 className="text-lg font-bold sm:text-xl">Create a Reading Plan</h2>
+                  <p className="text-xs text-[#6b7a77] sm:text-sm dark:text-white/60">
                     How many days do you want to read this book?
                   </p>
                 </div>
@@ -182,21 +182,21 @@ export function ReadingPlans() {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-lg p-2 text-[#7b8c84] hover:bg-[#f6f4ee] dark:hover:bg-white/10"
+                className="rounded-lg p-2 text-[#7b8c84] hover:bg-[#f6f4ee] dark:hover:bg-white/10 touch-manipulation"
               >
                 <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="mt-7 space-y-6">
+            <form onSubmit={handleSubmit} className="mt-5 space-y-5 sm:mt-7 sm:space-y-6">
               {/* 1. Book Selector */}
               <div>
-                <label className="mb-2 block text-sm font-semibold">1. Select a Book</label>
+                <label className="mb-2 block text-xs sm:text-sm font-semibold">1. Select a Book</label>
                 <select
                   required
                   value={selectedBookId}
                   onChange={(e) => setSelectedBookId(e.target.value)}
-                  className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] px-4 py-3 text-sm font-medium outline-none focus:border-[#007268] dark:border-white/10 dark:bg-white/5"
+                  className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] px-3.5 py-2.5 text-xs sm:text-sm font-medium outline-none focus:border-[#007268] dark:border-white/10 dark:bg-white/5"
                 >
                   {books.map((b) => (
                     <option key={b.id} value={b.id}>
@@ -208,12 +208,12 @@ export function ReadingPlans() {
 
               {/* 2. Days Selector & Presets */}
               <div>
-                <label className="mb-2 block text-sm font-semibold">
+                <label className="mb-2 block text-xs sm:text-sm font-semibold">
                   2. How many days do you want to read this book?
                 </label>
 
                 {/* Preset Day Buttons */}
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
                   {PRESET_DAYS.map((preset) => {
                     const Icon = preset.icon;
                     const isSelected = numDays === preset.days;
@@ -222,27 +222,27 @@ export function ReadingPlans() {
                         type="button"
                         key={preset.days}
                         onClick={() => setDays(preset.days)}
-                        className={`flex flex-col items-center justify-center rounded-2xl border p-3.5 text-center transition ${
+                        className={`flex min-h-[56px] flex-col items-center justify-center rounded-2xl border p-2.5 sm:p-3.5 text-center transition touch-manipulation ${
                           isSelected
                             ? 'border-[#009689] bg-[#e6f4f2] text-[#007268] ring-2 ring-[#009689]/20 dark:bg-[#009689]/20 dark:text-[#5fc4b8]'
                             : 'border-[#dfe5dc] bg-[#fbfcf9] text-[#556864] hover:border-[#009689]/50 dark:border-white/10 dark:bg-white/5 dark:text-white/70'
                         }`}
                       >
-                        <Icon size={18} className="mb-1" />
-                        <span className="text-sm font-bold">{preset.days} Days</span>
-                        <span className="text-[11px] opacity-70">{preset.desc}</span>
+                        <Icon size={18} className="mb-0.5 sm:mb-1" />
+                        <span className="text-xs sm:text-sm font-bold">{preset.days} Days</span>
+                        <span className="text-[10px] sm:text-[11px] opacity-70">{preset.desc}</span>
                       </button>
                     );
                   })}
                 </div>
 
                 {/* Custom Stepper & Range Slider */}
-                <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-[#dfe5dc] bg-[#fbfcf9] p-4 dark:border-white/10 dark:bg-white/5 sm:flex-row sm:items-center">
+                <div className="mt-3 sm:mt-4 flex flex-col gap-3 rounded-2xl border border-[#dfe5dc] bg-[#fbfcf9] p-3 sm:p-4 dark:border-white/10 dark:bg-white/5 sm:flex-row sm:items-center">
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setDays((d) => Math.max(1, d - 1))}
-                      className="grid h-10 w-10 place-items-center rounded-xl bg-white border border-[#d5ddd1] text-lg font-bold shadow-sm hover:bg-[#f6f4ee] dark:border-white/15 dark:bg-white/10"
+                      className="grid h-11 w-11 place-items-center rounded-xl bg-white border border-[#d5ddd1] text-lg font-bold shadow-sm hover:bg-[#f6f4ee] dark:border-white/15 dark:bg-white/10 touch-manipulation"
                     >
                       -
                     </button>
@@ -257,11 +257,11 @@ export function ReadingPlans() {
                     <button
                       type="button"
                       onClick={() => setDays((d) => Math.min(365, d + 1))}
-                      className="grid h-10 w-10 place-items-center rounded-xl bg-white border border-[#d5ddd1] text-lg font-bold shadow-sm hover:bg-[#f6f4ee] dark:border-white/15 dark:bg-white/10"
+                      className="grid h-11 w-11 place-items-center rounded-xl bg-white border border-[#d5ddd1] text-lg font-bold shadow-sm hover:bg-[#f6f4ee] dark:border-white/15 dark:bg-white/10 touch-manipulation"
                     >
                       +
                     </button>
-                    <span className="text-sm font-semibold text-[#556864] dark:text-white/70">days total</span>
+                    <span className="text-xs sm:text-sm font-semibold text-[#556864] dark:text-white/70">days total</span>
                   </div>
 
                   <input
@@ -270,7 +270,7 @@ export function ReadingPlans() {
                     max="90"
                     value={days}
                     onChange={(e) => setDays(Number(e.target.value))}
-                    className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-[#d5ddd1] accent-[#009689] dark:bg-white/20"
+                    className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-[#d5ddd1] accent-[#009689] dark:bg-white/20 touch-manipulation"
                   />
                 </div>
               </div>
@@ -358,17 +358,17 @@ export function ReadingPlans() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-2">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
-                  className="rounded-xl border border-[#d5ddd1] px-5 py-3 text-sm font-semibold hover:bg-[#f6f4ee] dark:border-white/15 dark:hover:bg-white/5"
+                  className="min-h-[44px] rounded-xl border border-[#d5ddd1] px-5 py-2.5 text-sm font-semibold hover:bg-[#f6f4ee] dark:border-white/15 dark:hover:bg-white/5 touch-manipulation text-center"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#009689] px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268]"
+                  className="inline-flex min-h-[44px] justify-center items-center gap-2 rounded-xl bg-[#009689] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] touch-manipulation"
                 >
                   <CheckCircle2 size={18} /> Save Reading Plan
                 </button>
@@ -379,33 +379,33 @@ export function ReadingPlans() {
 
         {/* Plans List */}
         {!plans.length && !open ? (
-          <div className="mt-8 rounded-3xl border border-dashed border-[#c9d6d2] bg-white p-12 text-center dark:border-white/10 dark:bg-[#142326]">
-            <CalendarDays className="mx-auto text-[#009689] dark:text-[#5fc4b8]" size={42} />
-            <h3 className="mt-4 text-xl font-bold">No Reading Plans Yet</h3>
-            <p className="mx-auto mt-2 max-w-md text-sm text-[#6b7a77] dark:text-white/60">
+          <div className="mt-6 rounded-3xl border border-dashed border-[#c9d6d2] bg-white p-8 sm:p-12 text-center dark:border-white/10 dark:bg-[#142326]">
+            <CalendarDays className="mx-auto text-[#009689] dark:text-[#5fc4b8]" size={40} />
+            <h3 className="mt-4 text-lg font-bold sm:text-xl">No Reading Plans Yet</h3>
+            <p className="mx-auto mt-2 max-w-md text-xs sm:text-sm text-[#6b7a77] dark:text-white/60">
               Set reading targets for books in your library. Choose how many days you want to spend on each book and stay on track.
             </p>
             {books.length > 0 ? (
               <button
                 onClick={() => setOpen(true)}
-                className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#009689] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268]"
+                className="mt-6 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] touch-manipulation"
               >
                 <Plus size={18} /> Create your first plan
               </button>
             ) : (
               <Link
                 to="/app/upload"
-                className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#009689] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268]"
+                className="mt-6 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] touch-manipulation"
               >
                 <Plus size={18} /> Upload a book first
               </Link>
             )}
           </div>
         ) : (
-          <div className="mt-8 space-y-5">
-            <h2 className="text-xl font-bold">Active Plans ({plans.length})</h2>
+          <div className="mt-6 sm:mt-8 space-y-4 sm:space-y-5">
+            <h2 className="text-lg font-bold sm:text-xl">Active Plans ({plans.length})</h2>
 
-            <div className="grid gap-5 md:grid-cols-2">
+            <div className="grid gap-4 sm:gap-5 md:grid-cols-2">
               {plans.map((plan) => {
                 const book = books.find((b) => b.id === plan.bookId);
                 const cover = book?.coverDataUrl || book?.coverUrl;
@@ -418,31 +418,31 @@ export function ReadingPlans() {
                 return (
                   <div
                     key={plan.id}
-                    className="group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-[#e4e1d6] bg-white p-5 shadow-sm transition duration-200 hover:border-[#009689]/40 hover:shadow-md dark:border-white/10 dark:bg-[#142326] sm:p-6"
+                    className="group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-[#e4e1d6] bg-white p-4 shadow-sm transition duration-200 hover:border-[#009689]/40 hover:shadow-md dark:border-white/10 dark:bg-[#142326] sm:p-6"
                   >
                     <div>
                       {/* Top Header: Cover, Title, Target */}
-                      <div className="flex gap-4">
+                      <div className="flex gap-3.5 sm:gap-4">
                         {/* Book Cover Thumbnail */}
-                        <div className="h-28 w-20 shrink-0 overflow-hidden rounded-xl bg-[#e8e4d9] shadow-sm dark:bg-[#1b2b2e]">
+                        <div className="h-24 w-16 sm:h-28 sm:w-20 shrink-0 overflow-hidden rounded-xl bg-[#e8e4d9] shadow-sm dark:bg-[#1b2b2e]">
                           {cover ? (
                             <img src={cover} alt="" className="h-full w-full object-cover" />
                           ) : (
                             <div className="grid h-full place-items-center bg-[#18332b] text-white">
-                              <BookOpen size={22} />
+                              <BookOpen size={20} />
                             </div>
                           )}
                         </div>
 
                         {/* Plan Details */}
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-2">
-                            <h3 className="truncate font-bold text-[#0b1619] dark:text-white" title={book?.title}>
+                          <div className="flex items-start justify-between gap-1.5">
+                            <h3 className="truncate text-sm sm:text-base font-bold text-[#0b1619] dark:text-white" title={book?.title}>
                               {book?.title || 'Book'}
                             </h3>
                             <button
                               onClick={() => handleRemove(plan.id)}
-                              className="rounded-lg p-1 text-[#9b5147] opacity-60 transition hover:bg-[#fff1ef] hover:opacity-100 dark:hover:bg-red-950/40"
+                              className="grid h-9 w-9 place-items-center rounded-lg text-[#9b5147] opacity-70 transition hover:bg-[#fff1ef] hover:opacity-100 dark:hover:bg-red-950/40 touch-manipulation"
                               title="Delete plan"
                             >
                               <Trash2 size={16} />
@@ -453,26 +453,26 @@ export function ReadingPlans() {
                             {book?.author || 'Unknown author'}
                           </p>
 
-                          <div className="mt-3 flex flex-wrap items-center gap-2">
-                            <span className="inline-flex items-center gap-1 rounded-lg bg-[#e6f4f2] px-2.5 py-1 text-xs font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
-                              <Target size={13} /> {plan.pagesPerDay} pages/day
+                          <div className="mt-2.5 sm:mt-3 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                            <span className="inline-flex items-center gap-1 rounded-lg bg-[#e6f4f2] px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                              <Target size={12} /> {plan.pagesPerDay} pages/day
                             </span>
-                            <span className="inline-flex items-center gap-1 rounded-lg bg-[#f0eee6] px-2.5 py-1 text-xs font-medium text-[#5c6863] dark:bg-white/10 dark:text-white/70">
-                              <CalendarDays size={13} /> Finish by {new Date(`${plan.targetDate}T12:00:00`).toLocaleDateString()}
+                            <span className="inline-flex items-center gap-1 rounded-lg bg-[#f0eee6] px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-medium text-[#5c6863] dark:bg-white/10 dark:text-white/70">
+                              <CalendarDays size={12} /> Finish by {new Date(`${plan.targetDate}T12:00:00`).toLocaleDateString()}
                             </span>
                           </div>
                         </div>
                       </div>
 
                       {/* Progress Bar */}
-                      <div className="mt-5">
+                      <div className="mt-4 sm:mt-5">
                         <div className="mb-1.5 flex items-center justify-between text-xs">
                           <span className="font-semibold text-[#556864] dark:text-white/70">
                             Page {currentPage} of {total}
                           </span>
                           <span className="font-bold text-[#007268] dark:text-[#5fc4b8]">{pct}%</span>
                         </div>
-                        <div className="h-2.5 overflow-hidden rounded-full bg-[#e9eee7] dark:bg-white/10">
+                        <div className="h-2 sm:h-2.5 overflow-hidden rounded-full bg-[#e9eee7] dark:bg-white/10">
                           <div
                             className="h-full rounded-full bg-gradient-to-r from-[#009689] to-[#d6a84a] transition-all duration-300"
                             style={{ width: `${pct}%` }}
@@ -482,7 +482,7 @@ export function ReadingPlans() {
                     </div>
 
                     {/* Bottom Action Footer */}
-                    <div className="mt-5 flex items-center justify-between border-t border-[#e4e1d6] pt-4 dark:border-white/10">
+                    <div className="mt-4 sm:mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 border-t border-[#e4e1d6] pt-3.5 sm:pt-4 dark:border-white/10">
                       <span className="text-xs text-[#7b8c84] dark:text-white/50">
                         {remainingPages > 0 ? `~${daysLeft} days left at target pace` : '🎉 Plan complete!'}
                       </span>
@@ -490,7 +490,7 @@ export function ReadingPlans() {
                       {book && (
                         <button
                           onClick={() => navigate(`/app/reader/${book.id}`)}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-[#007268]"
+                          className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-[#007268] touch-manipulation"
                         >
                           <Play size={13} fill="currentColor" /> Continue Reading
                         </button>

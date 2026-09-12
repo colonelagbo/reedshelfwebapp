@@ -119,32 +119,41 @@ export function Library() {
   return (
     <AppShell>
       <div className="mx-auto max-w-7xl">
-        <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
-            <h1 className="text-3xl font-bold">Your library</h1>
-            <p className="mt-1 text-[#6b7a77] dark:text-white/60">
+            <h1 className="text-2xl sm:text-3xl font-bold text-[#0b1619] dark:text-white">Your library</h1>
+            <p className="mt-1 text-xs sm:text-sm text-[#6b7a77] dark:text-white/60">
               Browse your books with original covers in your preferred layout.
             </p>
           </div>
           <Link
             to="/app/upload"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268]"
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#009689] px-4 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold text-white shadow-xs transition hover:bg-[#007268] active:scale-[0.98]"
           >
-            <Upload size={18} /> Upload book
+            <Upload size={17} /> Upload book
           </Link>
         </div>
 
-        <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+        <div className="mt-5 sm:mt-7 flex flex-col gap-2.5 sm:flex-row sm:items-center">
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-3.5 text-[#8b9a93]" size={18} />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search title or author..."
-              className="w-full rounded-xl border border-[#d5ddd1] bg-white py-3 pl-11 pr-4 outline-none focus:border-[#007268] focus:ring-2 focus:ring-[#007268]/20 dark:border-white/10 dark:bg-[#142326]"
+              className="w-full rounded-xl border border-[#d5ddd1] bg-white py-2.5 sm:py-3 pl-11 pr-9 text-sm outline-none focus:border-[#007268] focus:ring-2 focus:ring-[#007268]/20 dark:border-white/10 dark:bg-[#142326]"
             />
+            {query && (
+              <button
+                onClick={() => setQuery('')}
+                className="absolute right-3 top-3 rounded-md p-0.5 text-[#8b9a93] hover:text-[#0b1619] dark:hover:text-white"
+                aria-label="Clear search"
+              >
+                <X size={16} />
+              </button>
+            )}
           </div>
-          <div className="flex rounded-xl border border-[#d5ddd1] bg-white p-1 dark:border-white/10 dark:bg-[#142326]">
+          <div className="flex items-center justify-between sm:justify-start rounded-xl border border-[#d5ddd1] bg-white p-1 dark:border-white/10 dark:bg-[#142326]">
             {viewButtons.map((btn) => {
               const Icon = btn.icon;
               return (
@@ -152,9 +161,9 @@ export function Library() {
                   key={btn.id}
                   title={btn.label}
                   onClick={() => changeView(btn.id)}
-                  className={`rounded-lg p-2.5 transition ${
+                  className={`flex-1 sm:flex-initial flex items-center justify-center rounded-lg p-2 sm:p-2.5 transition min-w-[38px] ${
                     view === btn.id
-                      ? 'bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]'
+                      ? 'bg-[#e6f4f2] text-[#007268] font-bold dark:bg-[#009689]/20 dark:text-[#5fc4b8]'
                       : 'text-[#7b8c84] hover:text-[#0b1619] dark:hover:text-white'
                   }`}
                 >
@@ -167,13 +176,13 @@ export function Library() {
 
         {filtered.length ? (
           <div
-            className={`mt-7 ${
+            className={`mt-5 sm:mt-7 ${
               view === 'grid'
-                ? 'grid gap-5 sm:grid-cols-2 lg:grid-cols-4'
+                ? 'grid grid-cols-2 gap-3 sm:gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'
                 : view === 'wide'
-                ? 'grid gap-6 md:grid-cols-2 lg:grid-cols-3'
+                ? 'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'
                 : view === 'shelf'
-                ? 'space-y-3'
+                ? 'space-y-2.5 sm:space-y-3'
                 : 'divide-y divide-[#e4e1d6] dark:divide-white/10'
             }`}
           >

@@ -201,7 +201,7 @@ export function Profile() {
             <button
               onClick={saveProfile}
               disabled={savingProfile}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#009689] px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] disabled:opacity-50"
+              className="mt-5 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] disabled:opacity-50 touch-manipulation"
             >
               {savingProfile ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}
               {savingProfile ? 'Saving...' : 'Save profile'}
@@ -241,7 +241,7 @@ export function Profile() {
             <button
               onClick={changePassword}
               disabled={changingPass}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl border border-[#d5ddd1] px-5 py-3 text-sm font-semibold transition hover:bg-[#f6f4ee] disabled:opacity-50 dark:border-white/10 dark:hover:bg-white/5"
+              className="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-[#d5ddd1] px-5 py-2.5 text-sm font-semibold transition hover:bg-[#f6f4ee] disabled:opacity-50 dark:border-white/10 dark:hover:bg-white/5 touch-manipulation"
             >
               {changingPass ? <Loader2 size={17} className="animate-spin" /> : <Lock size={17} />}
               {changingPass ? 'Updating...' : 'Change password'}
@@ -280,7 +280,7 @@ export function Profile() {
                 <button
                   onClick={handleDisable2FA}
                   disabled={disabling2FA}
-                  className="inline-flex items-center gap-2 rounded-xl border border-[#fecaca] bg-white px-5 py-2.5 text-xs font-semibold text-[#dc2626] transition hover:bg-[#fee2e2] disabled:opacity-50 dark:border-[#7f1d1d] dark:bg-[#142326] dark:hover:bg-[#450a0a]"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-[#fecaca] bg-white px-5 py-2.5 text-xs font-semibold text-[#dc2626] transition hover:bg-[#fee2e2] disabled:opacity-50 dark:border-[#7f1d1d] dark:bg-[#142326] dark:hover:bg-[#450a0a] touch-manipulation"
                 >
                   {disabling2FA ? <Loader2 size={15} className="animate-spin" /> : <ShieldCheck size={15} />}
                   Disable Authenticator
@@ -288,7 +288,7 @@ export function Profile() {
               ) : (
                 <button
                   onClick={() => setShow2FASetup(true)}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268]"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268] touch-manipulation"
                 >
                   <ShieldCheck size={15} />
                   Set Up Authenticator App
@@ -317,7 +317,7 @@ export function Profile() {
                   <div className="mt-4">
                     <Link
                       to="/admin/users"
-                      className="inline-flex items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268]"
+                      className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268] touch-manipulation"
                     >
                       <span>Open Admin Console</span>
                       <ArrowRight size={14} />

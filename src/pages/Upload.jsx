@@ -246,8 +246,8 @@ export function Upload() {
       <div className="mx-auto max-w-3xl">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Upload a book</h1>
-            <p className="mt-1 text-[#6b7a77] dark:text-white/60">
+            <h1 className="text-2xl font-bold sm:text-3xl">Upload a book</h1>
+            <p className="mt-1 text-xs text-[#6b7a77] sm:text-sm dark:text-white/60">
               Select a PDF and ReedShelf will automatically generate the title, author, and book cover.
             </p>
           </div>
@@ -262,10 +262,10 @@ export function Upload() {
 
         <form
           onSubmit={handleSubmit}
-          className="mt-7 rounded-3xl border border-[#e4e1d6] bg-white p-5 shadow-sm dark:border-white/10 dark:bg-[#12232a] sm:p-8"
+          className="mt-5 rounded-3xl border border-[#e4e1d6] bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#12232a] sm:mt-7 sm:p-8"
         >
           {error && (
-            <div className="mb-6 flex items-start gap-2.5 rounded-xl bg-[#fff1ef] p-4 text-sm text-[#9b5147] dark:bg-[#3a1a17] dark:text-[#fca5a5]">
+            <div className="mb-5 flex items-start gap-2.5 rounded-xl bg-[#fff1ef] p-3.5 text-sm text-[#9b5147] dark:bg-[#3a1a17] dark:text-[#fca5a5]">
               <AlertCircle size={18} className="mt-0.5 shrink-0" />
               <span>{error}</span>
             </div>
@@ -286,22 +286,22 @@ export function Upload() {
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className={`group cursor-pointer rounded-2xl border-2 border-dashed p-10 text-center transition ${
+                className={`group cursor-pointer rounded-2xl border-2 border-dashed p-6 text-center transition sm:p-10 ${
                   isDragging
                     ? 'border-[#007268] bg-[#e6f4f2]/50 dark:bg-[#007268]/20'
                     : 'border-[#c9d6d2] bg-[#fbfcf9] hover:border-[#007268] hover:bg-[#f6faf8] dark:border-white/20 dark:bg-white/5 dark:hover:border-[#009689]'
                 }`}
               >
                 <div className="mx-auto flex max-w-sm flex-col items-center">
-                  <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[#e6f4f2] text-[#009689] transition group-hover:scale-105 dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
-                    <UploadCloud size={32} />
+                  <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[#e6f4f2] text-[#009689] transition group-hover:scale-105 sm:h-16 sm:w-16 dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                    <UploadCloud size={30} />
                   </div>
-                  <span className="mt-4 text-base font-semibold">Choose a PDF or drag & drop</span>
-                  <span className="mt-1 text-sm text-[#6b7a77] dark:text-white/60">
+                  <span className="mt-3 text-base font-semibold sm:mt-4">Tap to choose PDF or drag & drop</span>
+                  <span className="mt-1 text-xs text-[#6b7a77] sm:text-sm dark:text-white/60">
                     PDF files up to 50MB
                   </span>
-                  <div className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2 text-xs font-semibold text-white shadow-sm transition group-hover:bg-[#007268]">
-                    <FileText size={14} /> Browse file
+                  <div className="mt-4 inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-[#009689] px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition group-hover:bg-[#007268] touch-manipulation">
+                    <FileText size={16} /> Browse device
                   </div>
                 </div>
               </div>
@@ -317,11 +317,11 @@ export function Upload() {
                   </p>
                 </div>
               ) : (
-                <div className="relative overflow-hidden rounded-2xl border border-[#dfe5dc] bg-[#fbfcf9] p-5 dark:border-white/10 dark:bg-white/5 sm:p-6">
+                <div className="relative overflow-hidden rounded-2xl border border-[#dfe5dc] bg-[#fbfcf9] p-4 sm:p-6 dark:border-white/10 dark:bg-white/5">
                   <button
                     type="button"
                     onClick={handleRemoveFile}
-                    className="absolute right-4 top-4 rounded-lg p-1.5 text-[#8b9a93] hover:bg-[#e4e1d6] hover:text-[#0b1619] dark:hover:bg-white/10 dark:hover:text-white"
+                    className="absolute right-3 top-3 rounded-lg p-2 text-[#8b9a93] hover:bg-[#e4e1d6] hover:text-[#0b1619] dark:hover:bg-white/10 dark:hover:text-white"
                     title="Remove file"
                   >
                     <X size={18} />
@@ -357,14 +357,14 @@ export function Upload() {
                     <div className="min-w-0 flex-1 space-y-3">
                       <div>
                         <span className="text-xs font-medium text-[#7b8c84] dark:text-white/50">Title</span>
-                        <h3 className="text-xl font-bold tracking-tight text-[#0b1619] dark:text-white sm:text-2xl">
+                        <h3 className="text-lg font-bold tracking-tight text-[#0b1619] sm:text-2xl dark:text-white">
                           {extractedInfo?.title || file.name}
                         </h3>
                       </div>
 
                       <div>
                         <span className="text-xs font-medium text-[#7b8c84] dark:text-white/50">Author</span>
-                        <p className="text-base font-medium text-[#4a5a58] dark:text-white/80">
+                        <p className="text-sm font-medium text-[#4a5a58] sm:text-base dark:text-white/80">
                           {extractedInfo?.author || 'Unknown author'}
                         </p>
                       </div>
@@ -386,18 +386,18 @@ export function Upload() {
             </div>
           )}
 
-          <div className="mt-8 flex items-center justify-end gap-3 border-t border-[#e4e1d6] pt-6 dark:border-white/10">
+          <div className="mt-6 sm:mt-8 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 border-t border-[#e4e1d6] pt-5 sm:pt-6 dark:border-white/10">
             <button
               type="button"
               onClick={() => navigate('/app/library')}
-              className="rounded-xl border border-[#d5ddd1] px-5 py-3 text-sm font-semibold hover:bg-[#f6f4ee] dark:border-white/15 dark:hover:bg-white/5"
+              className="min-h-[44px] rounded-xl border border-[#d5ddd1] px-5 py-2.5 text-sm font-semibold hover:bg-[#f6f4ee] dark:border-white/15 dark:hover:bg-white/5 touch-manipulation text-center"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!file || extracting || saving}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#009689] px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-[44px] justify-center items-center gap-2 rounded-xl bg-[#009689] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] disabled:cursor-not-allowed disabled:opacity-50 touch-manipulation"
             >
               {saving ? (
                 <>

@@ -93,7 +93,7 @@ export function Reader() {
   const [totalPages, setTotalPages] = useState(book?.totalPages || 1);
   const [currentPage, setCurrentPage] = useState(() => (user && bookId ? getProgress(user.id, bookId).page : 1));
   const [scale, setScale] = useState(1.0);
-  const [fitMode, setFitMode] = useState('page'); // 'page', 'width', 'custom'
+  const [fitMode, setFitMode] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'width' : 'page'));
   const [readerTheme, setReaderTheme] = useState('dark');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -109,6 +109,7 @@ export function Reader() {
   const textLayerRef = useRef(null);
   const renderTaskRef = useRef(null);
   const lastTapRef = useRef({ time: 0, x: 0, y: 0 });
+  const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
   const fileInputRef = useRef(null);
 
   const themeConfig = THEMES[readerTheme] || THEMES.dark;
@@ -223,12 +224,15 @@ export function Reader() {
 
       let currentScale = scale;
       if (fitMode === 'width') {
-        const availableWidth = Math.max(300, containerWidth - 32);
+        const padding = containerWidth < 640 ? 12 : 32;
+        const availableWidth = Math.max(260, containerWidth - padding);
         currentScale = availableWidth / unscaledViewport.width;
       } else if (fitMode === 'page') {
-        const availableHeight = Math.max(350, containerHeight - 32);
+        const paddingH = containerHeight < 640 ? 16 : 32;
+        const paddingW = containerWidth < 640 ? 12 : 32;
+        const availableHeight = Math.max(300, containerHeight - paddingH);
         const scaleH = availableHeight / unscaledViewport.height;
-        const availableWidth = Math.max(300, containerWidth - 32);
+        const availableWidth = Math.max(260, containerWidth - paddingW);
         const scaleW = availableWidth / unscaledViewport.width;
         currentScale = Math.min(scaleH, scaleW);
       }
@@ -357,15 +361,43 @@ export function Reader() {
     setTimeout(() => handleSelectionCheck(e, true), 30);
   };
 
+  const handleTouchStart = (e) => {
+    const touch = e.touches?.[0];
+    if (touch) {
+      touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+    }
+  };
+
   const handleTouchEnd = (e) => {
-    const now = Date.now();
     const touch = e.changedTouches?.[0];
+    if (!touch) return;
+
+    const startX = touchStartRef.current.x;
+    const startY = touchStartRef.current.y;
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+    const deltaTime = Date.now() - touchStartRef.current.time;
+
+    // Check if horizontal swipe gesture (at least 45px, mainly horizontal, fast swipe)
+    if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4 && deltaTime < 450) {
+      if (deltaX < 0) {
+        // Swipe left -> Next Page
+        setCurrentPage((p) => Math.min(totalPages, p + 1));
+      } else {
+        // Swipe right -> Prev Page
+        setCurrentPage((p) => Math.max(1, p - 1));
+      }
+      return;
+    }
+
+    // Double tap handling
+    const now = Date.now();
     const timeDiff = now - lastTapRef.current.time;
 
-    if (touch && timeDiff < 350) {
+    if (timeDiff < 350) {
       lastTapRef.current = { time: 0, x: 0, y: 0 };
       setTimeout(() => handleSelectionCheck(e, true), 50);
-    } else if (touch) {
+    } else {
       lastTapRef.current = { time: now, x: touch.clientX, y: touch.clientY };
       setTimeout(() => handleSelectionCheck(e, false), 160);
     }
@@ -495,41 +527,41 @@ export function Reader() {
       {/* Fullscreen Reader Header with Close Arrow */}
       <header
         style={{ backgroundColor: themeConfig.navBg, borderColor: themeConfig.border }}
-        className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b px-3 backdrop-blur sm:px-5"
+        className="relative z-40 flex h-13 sm:h-14 shrink-0 items-center justify-between border-b px-2.5 sm:px-5 backdrop-blur gap-2"
       >
         {/* Left: Close Arrow + Book Info */}
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button
             onClick={() => navigate('/app/library')}
-            className="group flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-sm font-bold transition hover:bg-[#009689] hover:text-white"
+            className="group flex h-9 sm:h-10 items-center gap-1 rounded-xl bg-white/10 px-2.5 sm:px-3 text-xs sm:text-sm font-bold transition hover:bg-[#009689] hover:text-white shrink-0 active:scale-95"
             title="Close book and return to library (Escape)"
           >
-            <ArrowLeft size={18} className="transition-transform group-hover:-translate-x-1" />
-            <span>Close</span>
+            <ArrowLeft size={16} className="transition-transform group-hover:-translate-x-0.5 sm:size-[18px]" />
+            <span className="hidden sm:inline">Close</span>
           </button>
 
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-bold sm:text-base" title={book?.title || 'Reading'}>
+          <div className="min-w-0 max-w-[110px] xs:max-w-[150px] sm:max-w-xs md:max-w-md">
+            <h1 className="truncate text-xs sm:text-base font-bold leading-tight" title={book?.title || 'Reading'}>
               {book?.title || 'Reading Book'}
             </h1>
-            <p className="truncate text-[11px] opacity-60" title={book?.author || ''}>
+            <p className="truncate text-[10px] sm:text-[11px] opacity-60 hidden sm:block leading-tight" title={book?.author || ''}>
               {book?.author || 'Unknown author'}
             </p>
           </div>
         </div>
 
         {/* Center: Page Controls */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 sm:gap-1">
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage <= 1}
-            className="rounded-lg p-1.5 opacity-80 transition hover:bg-white/10 hover:opacity-100 disabled:opacity-20"
-            title="Previous page (Left Arrow / PageUp)"
+            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg opacity-80 transition hover:bg-white/10 hover:opacity-100 disabled:opacity-20 active:scale-90"
+            title="Previous page"
           >
-            <ChevronLeft size={19} />
+            <ChevronLeft size={17} />
           </button>
 
-          <div className="flex items-center gap-1 px-1 text-xs">
+          <div className="flex items-center gap-0.5 sm:gap-1 px-0.5 sm:px-1 text-xs">
             <input
               type="number"
               min={1}
@@ -541,110 +573,64 @@ export function Reader() {
                   setCurrentPage(val);
                 }
               }}
-              className="w-12 rounded-lg border border-white/20 bg-white/10 py-1 text-center font-bold outline-none focus:border-[#009689]"
+              className="w-10 sm:w-12 rounded-lg border border-white/20 bg-white/10 py-0.5 sm:py-1 text-center font-bold text-xs outline-none focus:border-[#009689]"
             />
             <span className="opacity-40">/</span>
-            <span className="font-bold opacity-80">{totalPages}</span>
+            <span className="font-bold opacity-80 text-xs">{totalPages}</span>
           </div>
 
           <button
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage >= totalPages}
-            className="rounded-lg p-1.5 opacity-80 transition hover:bg-white/10 hover:opacity-100 disabled:opacity-20"
-            title="Next page (Right Arrow / PageDown / Space)"
+            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg opacity-80 transition hover:bg-white/10 hover:opacity-100 disabled:opacity-20 active:scale-90"
+            title="Next page"
           >
-            <ChevronRight size={19} />
+            <ChevronRight size={17} />
           </button>
         </div>
 
-        {/* Right: Theme, Zoom, Highlights, Fullscreen */}
-        <div className="flex items-center gap-1.5">
+        {/* Right: Theme, Highlights, Fullscreen */}
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {/* Reader Theme Switcher */}
-          <div className="hidden items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1 sm:flex">
+          <div className="flex items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 p-0.5 sm:p-1">
             <button
               onClick={() => setReaderTheme('dark')}
-              className={`rounded-lg p-1.5 transition ${
+              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition ${
                 readerTheme === 'dark' ? 'bg-[#009689] text-white' : 'opacity-60 hover:opacity-100'
               }`}
               title="Dark theme"
             >
-              <Moon size={14} />
+              <Moon size={13} />
             </button>
             <button
               onClick={() => setReaderTheme('sepia')}
-              className={`rounded-lg p-1.5 transition ${
+              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition ${
                 readerTheme === 'sepia' ? 'bg-[#d6a84a] text-[#0b1619]' : 'opacity-60 hover:opacity-100'
               }`}
-              title="Sepia warm theme"
+              title="Sepia theme"
             >
-              <Coffee size={14} />
+              <Coffee size={13} />
             </button>
             <button
               onClick={() => setReaderTheme('light')}
-              className={`rounded-lg p-1.5 transition ${
+              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition ${
                 readerTheme === 'light' ? 'bg-white text-[#0b1619]' : 'opacity-60 hover:opacity-100'
               }`}
               title="Light theme"
             >
-              <Sun size={14} />
+              <Sun size={13} />
             </button>
           </div>
 
-          {/* Zoom controls */}
-          <div className="hidden items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1 md:flex">
-            <button
-              onClick={() => {
-                setScale((s) => Math.max(0.5, s - 0.15));
-                setFitMode('custom');
-              }}
-              className="rounded-lg p-1 opacity-70 hover:bg-white/10 hover:opacity-100"
-              title="Zoom out (-)"
-            >
-              <Minus size={15} />
-            </button>
-            <button
-              onClick={() => {
-                setFitMode('page');
-              }}
-              className="min-w-[42px] text-center text-[11px] font-bold opacity-80 hover:underline"
-              title="Reset to Fit Page"
-            >
-              {fitMode === 'page' ? 'Fit Page' : fitMode === 'width' ? 'Fit Width' : `${Math.round(scale * 100)}%`}
-            </button>
-            <button
-              onClick={() => {
-                setScale((s) => Math.min(3.0, s + 0.15));
-                setFitMode('custom');
-              }}
-              className="rounded-lg p-1 opacity-70 hover:bg-white/10 hover:opacity-100"
-              title="Zoom in (+)"
-            >
-              <Plus size={15} />
-            </button>
-          </div>
-
-          {/* Fit to width button */}
-          <button
-            onClick={() => {
-              setFitMode((m) => (m === 'width' ? 'page' : 'width'));
-            }}
-            className={`hidden rounded-xl p-2 text-xs font-semibold sm:inline-flex ${
-              fitMode === 'width' ? 'bg-[#009689] text-white' : 'bg-white/5 opacity-80 hover:bg-white/10'
-            }`}
-            title="Toggle Fit Width / Fit Page"
-          >
-            <SlidersHorizontal size={16} />
-          </button>
-
-          {/* Highlights drawer toggle */}
+          {/* Highlights toggle */}
           <button
             onClick={() => setShowHighlightsDrawer((v) => !v)}
-            className={`relative rounded-xl p-2 transition ${
+            className={`relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl transition ${
               showHighlightsDrawer ? 'bg-[#d6a84a] text-[#0b1619]' : 'bg-white/5 opacity-80 hover:bg-white/10'
             }`}
             title="Toggle Highlights Drawer"
           >
-            <Highlighter size={17} />
+            <Highlighter size={16} />
             {highlights.length > 0 && (
               <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[#d6a84a] px-1 text-[9px] font-black text-[#0b1619]">
                 {highlights.length}
@@ -655,10 +641,10 @@ export function Reader() {
           {/* Fullscreen toggle */}
           <button
             onClick={toggleFullscreen}
-            className="rounded-xl bg-white/5 p-2 opacity-80 hover:bg-white/10 hover:opacity-100"
-            title="Toggle Fullscreen"
+            className="hidden sm:flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-white/5 opacity-80 transition hover:bg-white/10 hover:opacity-100"
+            title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
           >
-            {isFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
         </div>
       </header>
@@ -713,6 +699,7 @@ export function Reader() {
               }}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
+              onTouchStart={handleTouchStart}
               onTouchEnd={handleTouchEnd}
             >
               {/* Canvas Rendering of the PDF page */}
@@ -737,11 +724,11 @@ export function Reader() {
             </div>
           )}
 
-          {/* Quick Floating Next/Prev Side Buttons */}
+          {/* Quick Floating Next/Prev Side Buttons (Desktop only - mobile uses swipe gestures) */}
           {currentPage > 1 && !loading && (
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              className="fixed left-4 top-1/2 z-30 -translate-y-1/2 rounded-full border border-white/15 bg-black/60 p-3 text-white shadow-2xl backdrop-blur transition hover:scale-110 hover:bg-[#009689]"
+              className="hidden md:flex fixed left-4 top-1/2 z-30 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/60 p-3 text-white shadow-2xl backdrop-blur transition hover:scale-110 hover:bg-[#009689]"
               title="Previous page (Left Arrow)"
             >
               <ChevronLeft size={22} />
@@ -751,7 +738,7 @@ export function Reader() {
           {currentPage < totalPages && !loading && (
             <button
               onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              className="fixed right-4 top-1/2 z-30 -translate-y-1/2 rounded-full border border-white/15 bg-black/60 p-3 text-white shadow-2xl backdrop-blur transition hover:scale-110 hover:bg-[#009689]"
+              className="hidden md:flex fixed right-4 top-1/2 z-30 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/60 p-3 text-white shadow-2xl backdrop-blur transition hover:scale-110 hover:bg-[#009689]"
               title="Next page (Right Arrow / Space)"
             >
               <ChevronRight size={22} />
@@ -867,28 +854,33 @@ export function Reader() {
 
       {/* Fullscreen Reader Bottom Status & Scrub Bar */}
       <footer
-        style={{ backgroundColor: themeConfig.navBg, borderColor: themeConfig.border }}
-        className="flex h-11 shrink-0 items-center justify-between border-t px-4 text-xs opacity-80"
+        style={{
+          backgroundColor: themeConfig.navBg,
+          borderColor: themeConfig.border,
+          paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom, 0px))',
+        }}
+        className="flex min-h-[2.75rem] shrink-0 items-center justify-between border-t px-3 sm:px-4 py-1.5 text-xs opacity-90"
       >
-        <div className="flex items-center gap-2 font-medium">
-          <span>Progress: {totalPages ? Math.round((currentPage / totalPages) * 100) : 0}%</span>
+        <div className="flex items-center gap-1.5 sm:gap-2 font-medium text-[11px] sm:text-xs">
+          <span>{totalPages ? Math.round((currentPage / totalPages) * 100) : 0}%</span>
           <span className="opacity-40">•</span>
-          <span>Page {currentPage} of {totalPages}</span>
+          <span>p. {currentPage}/{totalPages || 1}</span>
         </div>
 
-        <div className="flex max-w-sm flex-1 items-center gap-2 px-4">
+        <div className="flex max-w-xs sm:max-w-sm flex-1 items-center gap-2 px-2 sm:px-4">
           <input
             type="range"
             min={1}
-            max={totalPages}
+            max={totalPages || 1}
             value={currentPage}
             onChange={(e) => setCurrentPage(Number(e.target.value))}
-            className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 accent-[#009689]"
+            aria-label="Seek page"
+            className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/20 accent-[#009689] touch-manipulation"
           />
         </div>
 
-        <div className="hidden items-center gap-3 sm:flex opacity-70">
-          <span>Double-tap text to highlight</span>
+        <div className="hidden items-center gap-3 sm:flex opacity-70 text-[11px]">
+          <span>Swipe or tap arrows to turn pages</span>
         </div>
       </footer>
     </div>

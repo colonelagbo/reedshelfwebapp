@@ -81,7 +81,7 @@ export function AuthLayout({
       <main className="w-full max-w-7xl mx-auto flex-1 flex flex-col justify-center py-2 sm:py-4 lg:py-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 lg:gap-12 xl:gap-16 items-center">
           {/* Left Column: Top Left Logo + Middle Story & Reed Plant Illustration */}
-          <div className="lg:col-span-7 flex flex-col justify-center">
+          <div className="order-2 lg:order-1 lg:col-span-7 flex flex-col justify-center">
             {/* Desktop Logo on top left */}
             <div className="hidden lg:block mb-8">
               <Link to="/" className="inline-flex">
@@ -109,14 +109,14 @@ export function AuthLayout({
               </p>
             </div>
 
-            {/* Desktop Reed Plant Image showcase card */}
-            <div className="hidden lg:block mt-7 max-w-lg">
+            {/* Reed Plant Image showcase card */}
+            <div className="mt-5 sm:mt-7 max-w-lg">
               {reedCard}
             </div>
           </div>
 
-          {/* Right Column: Sign In Card (Facebook style) */}
-          <div className="lg:col-span-5 flex flex-col items-center lg:items-end w-full">
+          {/* Right Column: Sign In / Auth Card */}
+          <div className="order-1 lg:order-2 lg:col-span-5 flex flex-col items-center lg:items-end w-full">
             <div className="w-full max-w-[430px] rounded-2xl sm:rounded-3xl border border-[#e4e1d6] bg-white p-5 sm:p-8 md:p-9 shadow-xl lg:shadow-2xl shadow-[#0b1619]/6 dark:border-white/10 dark:bg-[#12232a]">
               <div className="mb-5 sm:mb-6 text-left">
                 <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-[#0b1619] dark:text-white">
@@ -137,11 +137,6 @@ export function AuthLayout({
                 {footer}
               </div>
             )}
-
-            {/* Mobile Reed Plant Image Card (positioned below sign-in options on mobile) */}
-            <div className="lg:hidden w-full max-w-[430px] mt-6">
-              {reedCard}
-            </div>
           </div>
         </div>
       </main>
