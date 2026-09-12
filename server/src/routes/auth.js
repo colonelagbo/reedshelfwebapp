@@ -87,16 +87,14 @@ authRouter.post('/send-verification', async (req, res) => {
       code: verif.code
     });
 
-    const isDev = process.env.NODE_ENV !== 'production';
-
     res.json({
       success: true,
       message: `A 6-digit verification code has been sent to ${trimmedEmail}.`,
       email: trimmedEmail,
       expiresAt: verif.expiresAt,
       cooldownSeconds: verif.cooldownSeconds,
-      // Provide code in dev/test mode or if SMTP is in console fallback
-      ...(emailResult.mode !== 'smtp' || isDev ? { devCode: verif.code } : {})
+      // Provide devCode only for test domains or when offline without SMTP/Supabase delivery
+      ...(emailResult.mode === 'dev_console' || trimmedEmail.endsWith('@example.com') ? { devCode: verif.code } : {})
     });
   } catch (err) {
     console.error('Send verification error:', err);
@@ -127,9 +125,42 @@ authRouter.post('/register', async (req, res) => {
       });
     }
 
-    const verificationResult = verifyCode(trimmedEmail, code);
-    if (!verificationResult.valid) {
-      return res.status(400).json({ error: verificationResult.error });
+    const cleanCode = String(code).trim();
+    let isCodeValid = false;
+    let codeError = '';
+
+    // 1. Check local verification store (for SMTP or dev test codes)
+    const localResult = verifyCode(trimmedEmail, cleanCode);
+    if (localResult.valid) {
+      isCodeValid = true;
+    } else {
+      codeError = localResult.error;
+      // 2. If not matched in local store, verify with Supabase OTP mailer
+      try {
+        const { getSupabaseClient } = await import('../storage/supabase.js');
+        const supabase = getSupabaseClient();
+        if (supabase?.auth?.verifyOtp) {
+          const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
+            email: trimmedEmail,
+            token: cleanCode,
+            type: 'email'
+          });
+          if (!otpError && (otpData?.user || otpData?.session)) {
+            isCodeValid = true;
+          } else if (otpError) {
+            console.log(`[AUTH] Supabase OTP verification failed for ${trimmedEmail}:`, otpError.message);
+            codeError = otpError.message.includes('expired')
+              ? 'Verification code has expired or is invalid. Please request a new code.'
+              : 'Incorrect verification code. Please check your email and try again.';
+          }
+        }
+      } catch (err) {
+        console.warn('[AUTH] Supabase OTP verify error:', err.message);
+      }
+    }
+
+    if (!isCodeValid) {
+      return res.status(400).json({ error: codeError || 'Incorrect verification code. Please check your email and try again.' });
     }
 
     // Check if new registrations are disabled by admin

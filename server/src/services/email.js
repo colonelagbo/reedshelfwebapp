@@ -119,6 +119,13 @@ This code expires in 10 minutes.
 If you did not request this, please ignore this email.
 `;
 
+  // Skip external mailer for synthetic test addresses to preserve quota for real users
+  const isTestEmail = email.endsWith('@example.com') || email.endsWith('@test.com') || process.env.NODE_ENV === 'test';
+  if (isTestEmail) {
+    logConsoleVerification(email, code);
+    return { success: true, mode: 'dev_console' };
+  }
+
   const transporter = getTransporter();
 
   if (transporter) {
@@ -130,17 +137,46 @@ If you did not request this, please ignore this email.
         text: textContent,
         html: htmlContent
       });
-      console.log(`[EMAIL SERVICE] Verification email sent to ${email}: ${info.messageId}`);
+      console.log(`[EMAIL SERVICE] Verification email sent to ${email} via SMTP: ${info.messageId}`);
       return { success: true, mode: 'smtp', messageId: info.messageId };
     } catch (err) {
       console.error(`[EMAIL SERVICE] Failed to send via SMTP to ${email}:`, err.message);
       logConsoleVerification(email, code);
       return { success: true, mode: 'fallback_console', error: err.message };
     }
-  } else {
-    logConsoleVerification(email, code);
-    return { success: true, mode: 'dev_console' };
   }
+
+  // If no SMTP configured, dispatch real email verification via Supabase Mailer
+  try {
+    const { getSupabaseClient } = await import('../storage/supabase.js');
+    const supabase = getSupabaseClient();
+    if (supabase?.auth?.signInWithOtp) {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: true
+        }
+      });
+      if (error) {
+        console.warn(`[EMAIL SERVICE] Supabase OTP send warning for ${email}:`, error.message);
+        if (error.status === 429) {
+          throw new Error(error.message || 'Please wait a moment before requesting another verification code.');
+        }
+      } else {
+        console.log(`[EMAIL SERVICE] Real authenticator verification code dispatched to email: ${email}`);
+        return { success: true, mode: 'supabase_otp' };
+      }
+    }
+  } catch (err) {
+    if (err.message && err.message.includes('security purposes')) {
+      throw err;
+    }
+    console.warn('[EMAIL SERVICE] Supabase mailer fallback:', err.message);
+  }
+
+  // Log to console in dev mode
+  logConsoleVerification(email, code);
+  return { success: true, mode: 'dev_console' };
 }
 
 function logConsoleVerification(email, code) {
