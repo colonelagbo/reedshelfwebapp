@@ -1,21 +1,9 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs';
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-// 1. In-memory fallback worker ensures parsing NEVER fails even if Web Worker is blocked
+// Configure worker URL using Vite asset bundle with fallback
 if (typeof window !== 'undefined') {
-  window.pdfjsWorker = pdfjsWorker;
-}
-
-// 2. Set worker URL for multi-threaded worker offloading
-if (typeof window !== 'undefined') {
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url
-    ).toString();
-  } catch {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl || '/pdf.worker.min.mjs';
 }
 
 /**

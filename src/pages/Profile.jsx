@@ -32,8 +32,8 @@ import { TwoFactorSetupModal } from '../components/TwoFactorSetupModal';
 export function Profile() {
   const user = getCurrentUser();
   const [currentUserData, setCurrentUserData] = useState(user);
-  const [books, setBooks] = useState([]);
-  const [plans, setPlans] = useState([]);
+  const [books, setBooks] = useState(() => (user?.id ? getUserBooks(user.id) : []));
+  const [plans, setPlans] = useState(() => (user?.id ? getUserPlans(user.id) : []));
   const [name, setName] = useState(user?.name || '');
   const [avatar, setAvatar] = useState(user?.avatar || '');
   const [current, setCurrent] = useState('');
@@ -49,11 +49,9 @@ export function Profile() {
 
   useEffect(() => {
     if (!user?.id) return;
-    setBooks(getUserBooks(user.id));
-    setPlans(getUserPlans(user.id));
 
-    fetchBooks().then((b) => b && setBooks(b)).catch(() => {});
-    fetchPlans().then((p) => p && setPlans(p)).catch(() => {});
+    fetchBooks().then((b) => b && Array.isArray(b) && setBooks(b)).catch(() => {});
+    fetchPlans().then((p) => p && Array.isArray(p) && setPlans(p)).catch(() => {});
 
     api.auth.getMe().then((res) => {
       if (res?.user) {

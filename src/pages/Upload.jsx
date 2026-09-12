@@ -14,6 +14,7 @@ import {
 import { AppShell } from '../components/AppShell';
 import { addBook, getCurrentUser, saveBookFile, uploadBookFileToCloudflare } from '../lib/appStore';
 import { extractPdfInfo } from '../lib/pdfMetadata';
+import { supabase } from '../lib/supabaseClient';
 
 export function Upload() {
   const user = getCurrentUser();
@@ -114,6 +115,8 @@ export function Upload() {
 
       let book;
       const currentUser = getCurrentUser();
+      const currentUserId = currentUser?.id || user?.id || 'demo_user';
+
       try {
         book = await uploadBookFileToCloudflare(file, {
           title,
@@ -122,17 +125,81 @@ export function Upload() {
           coverDataUrl,
         });
       } catch (backendErr) {
-        console.warn('Backend upload failed, saving to local store:', backendErr);
-        book = addBook({
-          title,
-          author,
-          fileName: file.name,
-          fileType: file.type || 'application/pdf',
-          size: file.size,
-          uploadedBy: currentUser?.id || user?.id || 'demo_user',
-          totalPages,
-          coverDataUrl,
-        });
+        console.warn('Backend API upload notice, executing direct Supabase Storage & Database sync:', backendErr.message);
+
+        if (supabase) {
+          const bookId = `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
+          const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const storageKey = `books/${currentUserId}/${bookId}/${safeName}`;
+
+          const { error: uploadErr } = await supabase.storage
+            .from('reedshelf-books')
+            .upload(storageKey, file, { contentType: 'application/pdf', upsert: true });
+
+          if (uploadErr) {
+            throw new Error(`Supabase Storage upload failed: ${uploadErr.message}`);
+          }
+
+          const { data: publicUrlData } = supabase.storage.from('reedshelf-books').getPublicUrl(storageKey);
+          let directSignedUrl = null;
+          try {
+            const { data: sData } = await supabase.storage.from('reedshelf-books').createSignedUrl(storageKey, 86400 * 7);
+            directSignedUrl = sData?.signedUrl;
+          } catch {
+            // Signed URL optional
+          }
+
+          const finalUrl = directSignedUrl || publicUrlData?.publicUrl || null;
+
+          // Try inserting into Supabase PostgreSQL books table
+          try {
+            await supabase.from('users').upsert({
+              id: currentUserId,
+              name: currentUser?.name || 'Reader',
+              email: currentUser?.email || 'reader@reedshelf.com',
+              created_at: new Date().toISOString(),
+            }, { onConflict: 'id' });
+
+            const { error: insertErr } = await supabase.from('books').insert({
+              id: bookId,
+              title,
+              author,
+              file_name: file.name,
+              file_type: file.type || 'application/pdf',
+              file_size: file.size,
+              total_pages: totalPages,
+              uploaded_by: currentUserId,
+              r2_key: storageKey,
+              cover_data_url: coverDataUrl,
+              cover_url: finalUrl,
+              created_at: new Date().toISOString(),
+            });
+
+            if (insertErr) {
+              console.warn('[Supabase DB Warning] Note: books table insert returned:', insertErr.message);
+            } else {
+              console.log(`[Supabase DB] Successfully inserted book record: ${bookId}`);
+            }
+          } catch (sbInsertErr) {
+            console.warn('[Supabase DB Warning] Could not insert to Supabase DB:', sbInsertErr.message);
+          }
+
+          book = addBook({
+            id: bookId,
+            title,
+            author,
+            fileName: file.name,
+            fileType: file.type || 'application/pdf',
+            size: file.size,
+            uploadedBy: currentUserId,
+            r2Key: storageKey,
+            totalPages,
+            coverDataUrl,
+            coverUrl: finalUrl,
+          });
+        } else {
+          throw backendErr;
+        }
       }
 
       // Cache locally in IndexedDB/memory for instantaneous reader opening

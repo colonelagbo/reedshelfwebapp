@@ -27,7 +27,7 @@ import { getCurrentUser } from '../../lib/appStore';
 import { useToast } from '../../components/AdminToast';
 
 export function AdminUsers() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const initialSearch = searchParams.get('search') || '';
 
   const [users, setUsers] = useState([]);
@@ -39,7 +39,7 @@ export function AdminUsers() {
   const [roleFilter, setRoleFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortField, setSortField] = useState('date');
-  const [sortOrder, setSortOrder] = useState('desc');
+  const [sortOrder] = useState('desc');
 
   // Modals & Dialogs
   const [selectedUser, setSelectedUser] = useState(null);
@@ -71,7 +71,7 @@ export function AdminUsers() {
     } finally {
       setLoading(false);
     }
-  }, [search, roleFilter, statusFilter, sortField, sortOrder, pagination.page, pagination.limit]);
+  }, [search, roleFilter, statusFilter, sortField, sortOrder, pagination.page, pagination.limit, toast]);
 
   useEffect(() => {
     fetchUsers();
@@ -351,7 +351,8 @@ export function AdminUsers() {
                           {/* Inspect Details */}
                           <button
                             onClick={() => handleInspect(u)}
-                            className="rounded-lg border border-[#e4e1d6] p-1.5 text-[#557067] hover:border-[#009689] hover:text-[#009689] dark:border-white/10 dark:text-white/60 dark:hover:border-[#5fc4b8] dark:hover:text-[#5fc4b8] transition"
+                            disabled={userDetailLoading}
+                            className="rounded-lg border border-[#e4e1d6] p-1.5 text-[#557067] hover:border-[#009689] hover:text-[#009689] dark:border-white/10 dark:text-white/60 dark:hover:border-[#5fc4b8] dark:hover:text-[#5fc4b8] transition disabled:opacity-50"
                             title="Inspect User Details & Library"
                           >
                             <Eye size={15} />

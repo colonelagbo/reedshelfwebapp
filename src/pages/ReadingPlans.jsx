@@ -49,21 +49,13 @@ export function ReadingPlans() {
     if (user?.id) {
       fetchPlans().then((p) => p && setPlans(p)).catch(() => {});
       fetchBooks().then((b) => {
-        if (b) {
+        if (b && Array.isArray(b)) {
           setBooks(b);
-          if (!selectedBookId && b.length > 0) {
-            setSelectedBookId(b[0].id);
-          }
+          setSelectedBookId((curr) => curr || (b.length > 0 ? b[0].id : ''));
         }
       }).catch(() => {});
     }
   }, [user?.id]);
-
-  useEffect(() => {
-    if (books.length > 0 && !selectedBookId) {
-      setSelectedBookId(books[0].id);
-    }
-  }, [books, selectedBookId]);
 
   const selectedBook = useMemo(
     () => books.find((b) => b.id === selectedBookId) || books[0],

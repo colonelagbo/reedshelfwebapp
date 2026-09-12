@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Activity,
   BookOpen,
@@ -18,7 +18,7 @@ export function AdminReadingActivity() {
   const [loading, setLoading] = useState(true);
   const toast = useToast();
 
-  const fetchActivity = async () => {
+  const fetchActivity = useCallback(async () => {
     setLoading(true);
     try {
       const res = await api.admin.getReadingActivity();
@@ -29,11 +29,11 @@ export function AdminReadingActivity() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     fetchActivity();
-  }, []);
+  }, [fetchActivity]);
 
   if (loading) {
     return (

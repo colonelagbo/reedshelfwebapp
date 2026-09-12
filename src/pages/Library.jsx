@@ -23,11 +23,8 @@ import {
   getProgress,
   getSettings,
   saveSettings,
-  getBookFile,
-  updateBook,
   deleteBook
 } from '../lib/appStore';
-import { extractPdfInfo } from '../lib/pdfMetadata';
 
 const viewButtons = [
   { id: 'grid', icon: LayoutGrid, label: 'Cover grid' },
@@ -42,6 +39,11 @@ export function Library() {
     const u = getCurrentUser();
     return u?.id ? getUserBooks(u.id) : getBooks();
   });
+  const [loading, setLoading] = useState(() => {
+    const u = getCurrentUser();
+    const init = u?.id ? getUserBooks(u.id) : getBooks();
+    return init.length === 0;
+  });
   const [query, setQuery] = useState('');
   const [view, setView] = useState(() => getSettings(getCurrentUser()?.id || '').libraryView || 'grid');
   const [bookToDelete, setBookToDelete] = useState(null);
@@ -49,36 +51,38 @@ export function Library() {
   const navigate = useNavigate();
 
   const loadBooks = useCallback(async () => {
-    const activeUser = getCurrentUser() || user;
+    const activeUser = getCurrentUser();
     const activeId = activeUser?.id;
+
+    if (activeUser && activeUser.id !== user?.id) {
+      setUser(activeUser);
+    }
 
     // Load instantly from local storage cache
     const initial = activeId ? getUserBooks(activeId) : getBooks();
     if (initial.length > 0) {
       setBooks(initial);
+      setLoading(false);
     }
 
     try {
       const fetched = await fetchBooks();
-      if (Array.isArray(fetched) && fetched.length > 0) {
-        setBooks(activeId ? fetched.filter((b) => {
+      if (Array.isArray(fetched)) {
+        const filtered = activeId ? fetched.filter((b) => {
           const owner = b.uploadedBy || b.uploaded_by;
           return !owner || owner === activeId || owner === 'demo_user';
-        }) : fetched);
-      } else if (initial.length > 0) {
-        setBooks(initial);
+        }) : fetched;
+        setBooks(filtered);
       }
     } catch (e) {
       console.warn('Could not load remote books:', e);
       if (initial.length > 0) setBooks(initial);
+    } finally {
+      setLoading(false);
     }
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
-    const currentUser = getCurrentUser();
-    if (currentUser) {
-      setUser(currentUser);
-    }
     loadBooks();
   }, [loadBooks]);
 
@@ -98,7 +102,7 @@ export function Library() {
   };
 
   const confirmDelete = async () => {
-    if (!bookToDelete || !userId) return;
+    if (!bookToDelete || !user?.id) return;
     setDeleting(true);
     try {
       await deleteBook(bookToDelete.id);
@@ -189,6 +193,12 @@ export function Library() {
                 />
               );
             })}
+          </div>
+        ) : loading && books.length === 0 ? (
+          <div className="mt-12 flex flex-col items-center justify-center py-20 text-center">
+            <Loader2 className="h-9 w-9 animate-spin text-[#009689]" />
+            <p className="mt-4 text-sm font-semibold text-[#0b1619] dark:text-white">Retrieving your library...</p>
+            <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60">Connecting to cloud bookshelf</p>
           </div>
         ) : (
           <div className="mt-8 rounded-2xl border border-dashed border-[#c9d6d2] bg-white p-12 text-center dark:border-white/10 dark:bg-[#142326]">

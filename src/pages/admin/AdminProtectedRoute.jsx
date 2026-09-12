@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate, Link, useNavigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 import { getCurrentUser, logoutUser, setCurrentUser } from '../../lib/appStore';
 import { authStorage, api } from '../../lib/api';
 import { ShieldAlert, ArrowLeft, LogOut, Key, CheckCircle, Loader2 } from 'lucide-react';
@@ -11,7 +11,6 @@ export function AdminForbidden({ user }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const navigate = useNavigate();
 
   const handleLogout = () => {
     logoutUser();

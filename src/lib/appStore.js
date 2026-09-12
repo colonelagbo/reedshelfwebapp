@@ -1,4 +1,5 @@
 import { api, authStorage } from './api';
+import { supabase } from './supabaseClient';
 
 const USERS_KEY = 'reedshelf_users_v1';
 const SESSION_KEY = 'reedshelf_session_v1';
@@ -164,17 +165,91 @@ export const getUserBooks = (userId) => {
 };
 
 export async function fetchBooks() {
+  // 1. Try fetching from Backend API
   try {
     const books = await api.books.list();
-    if (Array.isArray(books)) {
+    if (Array.isArray(books) && books.length > 0) {
+      write(BOOKS_KEY, books);
+      return books;
+    } else if (Array.isArray(books) && books.length === 0) {
+      // Check if Supabase direct has books before overwriting with []
+      if (supabase) {
+        const user = getCurrentUser();
+        if (user?.id) {
+          try {
+            const { data } = await supabase
+              .from('books')
+              .select('*')
+              .eq('uploaded_by', user.id)
+              .order('created_at', { ascending: false });
+            if (Array.isArray(data) && data.length > 0) {
+              const formatted = data.map((b) => ({
+                id: b.id,
+                title: b.title,
+                author: b.author,
+                fileName: b.file_name,
+                fileType: b.file_type,
+                size: Number(b.file_size || 0),
+                totalPages: Number(b.total_pages || 0),
+                uploadedBy: b.uploaded_by,
+                r2Key: b.r2_key,
+                coverDataUrl: b.cover_data_url,
+                coverUrl: b.cover_url,
+                createdAt: b.created_at,
+              }));
+              write(BOOKS_KEY, formatted);
+              return formatted;
+            }
+          } catch {
+            // Ignore
+          }
+        }
+      }
       write(BOOKS_KEY, books);
       return books;
     }
     return getBooks();
   } catch (err) {
-    console.warn('Could not fetch books from backend, using local store:', err.message);
-    return getBooks();
+    console.warn('Could not fetch books from backend API, checking Supabase direct:', err.message);
   }
+
+  // 2. Direct Supabase Database fallback
+  if (supabase) {
+    try {
+      const user = getCurrentUser();
+      if (user?.id) {
+        const { data, error } = await supabase
+          .from('books')
+          .select('*')
+          .eq('uploaded_by', user.id)
+          .order('created_at', { ascending: false });
+
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const formatted = data.map((b) => ({
+            id: b.id,
+            title: b.title,
+            author: b.author,
+            fileName: b.file_name,
+            fileType: b.file_type,
+            size: Number(b.file_size || 0),
+            totalPages: Number(b.total_pages || 0),
+            uploadedBy: b.uploaded_by,
+            r2Key: b.r2_key,
+            coverDataUrl: b.cover_data_url,
+            coverUrl: b.cover_url,
+            createdAt: b.created_at,
+          }));
+          write(BOOKS_KEY, formatted);
+          return formatted;
+        }
+      }
+    } catch (sbErr) {
+      console.warn('Could not query Supabase direct:', sbErr.message);
+    }
+  }
+
+  // 3. Keep local books cache, never wipe out books on temporary network failure
+  return getBooks();
 }
 
 export async function uploadBookFile(file, metadata) {
@@ -485,23 +560,57 @@ function cloneFileData(data) {
 export async function getBookFile(bookId) {
   if (!bookId) return null;
 
-  // 1. Try fetching directly from Backend / Cloudflare R2
-  try {
-    const arrayBuffer = await api.books.getFileData(bookId);
-    if (arrayBuffer && arrayBuffer.byteLength > 0) {
-      memoryFileCache.set(bookId, arrayBuffer);
-      return cloneFileData(arrayBuffer);
-    }
-  } catch (err) {
-    console.warn(`[Reader] Could not stream book ${bookId} from backend, checking local cache:`, err.message);
-  }
-
-  // 2. Check memory cache
+  // 1. Try memory cache first for instantaneous opening
   if (memoryFileCache.has(bookId)) {
     return cloneFileData(memoryFileCache.get(bookId));
   }
 
-  // 3. Check IndexedDB
+  // 2. Try fetching from Backend stream
+  try {
+    const arrayBuffer = await api.books.getFileData(bookId);
+    if (arrayBuffer && arrayBuffer.byteLength > 0) {
+      memoryFileCache.set(bookId, arrayBuffer);
+      saveBookFile(bookId, arrayBuffer).catch(() => {});
+      return cloneFileData(arrayBuffer);
+    }
+  } catch (err) {
+    console.warn(`[Reader] Backend streaming notice for book ${bookId}:`, err.message);
+  }
+
+  // 3. Try fetching directly from Supabase Storage
+  try {
+    const all = getBooks();
+    const b = all.find((x) => x.id === bookId);
+    const storageKey = b?.r2Key || b?.r2_key;
+
+    if (storageKey && supabase) {
+      const { data: blob, error: dlError } = await supabase.storage.from('reedshelf-books').download(storageKey);
+      if (!dlError && blob) {
+        const ab = await blob.arrayBuffer();
+        if (ab && ab.byteLength > 0) {
+          memoryFileCache.set(bookId, ab);
+          saveBookFile(bookId, ab).catch(() => {});
+          return cloneFileData(ab);
+        }
+      }
+    }
+
+    if (b?.coverUrl && b.coverUrl.includes('/storage/v1/object/')) {
+      const resp = await fetch(b.coverUrl);
+      if (resp.ok) {
+        const ab = await resp.arrayBuffer();
+        if (ab && ab.byteLength > 0) {
+          memoryFileCache.set(bookId, ab);
+          saveBookFile(bookId, ab).catch(() => {});
+          return cloneFileData(ab);
+        }
+      }
+    }
+  } catch (sbErr) {
+    console.warn(`[Reader] Could not download book ${bookId} directly from Supabase:`, sbErr.message);
+  }
+
+  // 4. Check IndexedDB
   try {
     const db = await openDb();
     return new Promise((resolve, reject) => {

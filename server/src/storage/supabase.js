@@ -25,7 +25,7 @@ try {
 let supabaseClient = null;
 let bucketChecked = false;
 
-function getSupabaseClient() {
+export function getSupabaseClient() {
   if (!supabaseClient && config.isSupabaseConfigured()) {
     supabaseClient = createClient(config.supabase.url, config.supabase.key, {
       auth: {
@@ -49,12 +49,17 @@ async function ensureBucket() {
   try {
     const { data: buckets, error } = await client.storage.listBuckets();
     if (!error && buckets) {
-      const exists = buckets.some((b) => b.name === config.supabase.bucketName);
-      if (!exists) {
+      const existing = buckets.find((b) => b.name === config.supabase.bucketName);
+      if (!existing) {
         console.log(`[Supabase] Creating storage bucket "${config.supabase.bucketName}"...`);
         await client.storage.createBucket(config.supabase.bucketName, {
           public: true,
           fileSizeLimit: 104857600, // 100MB limit
+        });
+      } else if (!existing.public) {
+        console.log(`[Supabase] Updating storage bucket "${config.supabase.bucketName}" to public...`);
+        await client.storage.updateBucket(config.supabase.bucketName, {
+          public: true,
         });
       }
     }
@@ -70,7 +75,7 @@ export const supabaseStorage = {
    * @param {string} key - File storage path (e.g. "books/user_123/book_456.pdf")
    * @param {Buffer|Uint8Array} body - File contents
    * @param {string} contentType - Content type (e.g. "application/pdf")
-   * @returns {Promise<{ key: string, url: string, storageType: 'supabase' | 'local' }>}
+   * @returns {Promise<{ key: string, url: string, signedUrl?: string, storageType: 'supabase' | 'local' }>}
    */
   async upload(key, body, contentType = 'application/pdf') {
     const client = getSupabaseClient();
@@ -93,11 +98,23 @@ export const supabaseStorage = {
           .from(config.supabase.bucketName)
           .getPublicUrl(key);
 
+        let signedUrl = null;
+        try {
+          const { data: signedData } = await client.storage
+            .from(config.supabase.bucketName)
+            .createSignedUrl(key, 86400 * 7); // 7 days signed URL
+          signedUrl = signedData?.signedUrl || null;
+        } catch {
+          // signed URL optional
+        }
+
         console.log(`[Supabase] Successfully uploaded ${key} to bucket "${config.supabase.bucketName}"`);
 
         return {
           key,
-          url: publicUrlData?.publicUrl || `/api/books/file/${encodeURIComponent(key)}`,
+          url: signedUrl || publicUrlData?.publicUrl || `/api/books/file/${encodeURIComponent(key)}`,
+          publicUrl: publicUrlData?.publicUrl || null,
+          signedUrl,
           storageType: 'supabase',
         };
       } catch (err) {
@@ -228,6 +245,27 @@ export const supabaseStorage = {
       } catch (err) {
         console.warn(`[Storage Warning] Could not delete local fallback file:`, err.message);
       }
+    }
+  },
+
+  /**
+   * Create a signed download URL for a file in Supabase Storage
+   * @param {string} key
+   * @param {number} expiresIn
+   * @returns {Promise<string|null>}
+   */
+  async getSignedUrl(key, expiresIn = 3600) {
+    const client = getSupabaseClient();
+    if (!client) return null;
+    try {
+      const { data, error } = await client.storage
+        .from(config.supabase.bucketName)
+        .createSignedUrl(key, expiresIn);
+      if (error) throw error;
+      return data?.signedUrl || null;
+    } catch (err) {
+      console.warn(`[Supabase Warning] Could not generate signed URL for ${key}:`, err.message);
+      return null;
     }
   },
 

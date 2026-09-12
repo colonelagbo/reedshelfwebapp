@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Users,
@@ -23,7 +23,7 @@ export function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const toast = useToast();
 
-  const fetchOverview = async (isRefresh = false) => {
+  const fetchOverview = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
 
@@ -38,11 +38,11 @@ export function AdminDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     fetchOverview();
-  }, []);
+  }, [fetchOverview]);
 
   if (loading) {
     return (
@@ -59,10 +59,8 @@ export function AdminDashboard() {
     totalUsers = 0,
     newUsersToday = 0,
     newUsersThisWeek = 0,
-    newUsersThisMonth = 0,
     totalBooks = 0,
     formattedStorageUsed = '0 B',
-    storageLimitGb = 100,
     formattedStorageLimit = '100 GB',
     formattedStorageAvailable = '100 GB',
     storageUsagePercentage = 0,

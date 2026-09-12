@@ -57,7 +57,7 @@ async function testConnection() {
   }
   console.log('✅ Successfully uploaded a test file');
 
-  const { data: downloadData, error: downloadError } = await supabase.storage
+  const { data: _downloadData, error: downloadError } = await supabase.storage
     .from(bucketName)
     .download('test-file.txt');
 

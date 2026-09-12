@@ -3,7 +3,7 @@ import http from 'http';
 
 function isPortActive(port) {
   return new Promise((resolve) => {
-    const req = http.get(`http://localhost:${port}/api/health`, (res) => {
+    const req = http.get(`http://localhost:${port}/api/health`, (_res) => {
       resolve(true);
     });
     req.on('error', () => resolve(false));

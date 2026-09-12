@@ -36,7 +36,7 @@ export function AdminStorage() {
 
   const toast = useToast();
 
-  const fetchStorageOverview = async () => {
+  const fetchStorageOverview = useCallback(async () => {
     try {
       const res = await api.admin.getStorage();
       setStorageData(res);
@@ -46,7 +46,7 @@ export function AdminStorage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   const fetchStorageUsers = useCallback(async () => {
     setUsersLoading(true);
@@ -68,11 +68,11 @@ export function AdminStorage() {
     } finally {
       setUsersLoading(false);
     }
-  }, [search, roleFilter, statusFilter, sortField, sortOrder, pagination.page, pagination.limit]);
+  }, [search, roleFilter, statusFilter, sortField, sortOrder, pagination.page, pagination.limit, toast]);
 
   useEffect(() => {
     fetchStorageOverview();
-  }, []);
+  }, [fetchStorageOverview]);
 
   useEffect(() => {
     fetchStorageUsers();
@@ -97,7 +97,6 @@ export function AdminStorage() {
 
   const {
     totalBooks = 0,
-    totalFiles = 0,
     storageUsedBytes = 0,
     formattedStorageUsed = '0 B',
     storageLimitGb = 100,

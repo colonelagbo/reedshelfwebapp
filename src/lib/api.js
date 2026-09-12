@@ -38,30 +38,45 @@ async function apiRequest(endpoint, options = {}) {
     headers['Content-Type'] = 'application/json';
   }
 
-  const response = await fetch(endpoint, {
-    ...options,
-    headers,
-  });
+  const timeoutMs = options.timeout || (endpoint.includes('/upload') ? 90000 : 10000);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (response.status === 401) {
-    // If unauthorized, clear token and cached user
-    authStorage.clearToken();
+  try {
+    const response = await fetch(endpoint, {
+      ...options,
+      headers,
+      signal: options.signal || controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.status === 401) {
+      // If unauthorized, clear token and cached user
+      authStorage.clearToken();
+    }
+
+    let data;
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      data = await response.json();
+    } else {
+      data = await response.text();
+    }
+
+    if (!response.ok) {
+      const errorMsg = (data && data.error) || (typeof data === 'string' && data) || `Request failed with status ${response.status}`;
+      throw new Error(errorMsg);
+    }
+
+    return data;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s. Please check your connection.`);
+    }
+    throw err;
   }
-
-  let data;
-  const contentType = response.headers.get('content-type');
-  if (contentType && contentType.includes('application/json')) {
-    data = await response.json();
-  } else {
-    data = await response.text();
-  }
-
-  if (!response.ok) {
-    const errorMsg = (data && data.error) || (typeof data === 'string' && data) || `Request failed with status ${response.status}`;
-    throw new Error(errorMsg);
-  }
-
-  return data;
 }
 
 export const api = {
@@ -197,11 +212,23 @@ export const api = {
       const token = authStorage.getToken();
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
-      const response = await fetch(url, { headers });
-      if (!response.ok) {
-        throw new Error(`Failed to load book file: ${response.statusText}`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout for large PDF streaming
+
+      try {
+        const response = await fetch(url, { headers, signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+          throw new Error(`Failed to load book file: ${response.statusText} (${response.status})`);
+        }
+        return await response.arrayBuffer();
+      } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          throw new Error('Loading book timed out after 30s. Please try again.');
+        }
+        throw err;
       }
-      return await response.arrayBuffer();
     },
 
     async update(id, changes) {
@@ -298,13 +325,13 @@ export const api = {
     },
 
     async getStorageUsers(params = {}) {
-      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined && v !== ''));
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== ''));
       const qs = new URLSearchParams(cleanParams).toString();
       return await apiRequest(`/api/admin/storage/users${qs ? `?${qs}` : ''}`);
     },
 
     async getUsers(params = {}) {
-      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined && v !== ''));
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== ''));
       const qs = new URLSearchParams(cleanParams).toString();
       return await apiRequest(`/api/admin/users${qs ? `?${qs}` : ''}`);
     },
@@ -334,7 +361,7 @@ export const api = {
     },
 
     async getBooks(params = {}) {
-      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined && v !== ''));
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== ''));
       const qs = new URLSearchParams(cleanParams).toString();
       return await apiRequest(`/api/admin/books${qs ? `?${qs}` : ''}`);
     },
@@ -355,7 +382,7 @@ export const api = {
     },
 
     async getAuditLogs(params = {}) {
-      const cleanParams = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== undefined && v !== ''));
+      const cleanParams = Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== ''));
       const qs = new URLSearchParams(cleanParams).toString();
       return await apiRequest(`/api/admin/audit-logs${qs ? `?${qs}` : ''}`);
     },

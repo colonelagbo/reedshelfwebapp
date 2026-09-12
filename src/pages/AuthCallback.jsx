@@ -6,7 +6,6 @@ import { api } from '../lib/api';
 import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
 
 export function AuthCallback() {
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [twoFactorData, setTwoFactorData] = useState(null);
   const navigate = useNavigate();
@@ -34,7 +33,6 @@ export function AuthCallback() {
 
         if (res.require2FA) {
           setTwoFactorData({ tempToken: res.tempToken, email: res.email });
-          setLoading(false);
           return;
         }
 
@@ -42,7 +40,6 @@ export function AuthCallback() {
       } catch (err) {
         console.error('Auth callback error:', err);
         setError(err.message || 'Authentication failed. Please try signing in again.');
-        setLoading(false);
       }
     }
 

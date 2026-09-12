@@ -42,7 +42,9 @@ export function authenticateToken(req, res, next) {
           'INSERT INTO users (id, name, email, password, avatar, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
           [user.id, user.name, user.email, '', user.avatar, user.role, user.status, user.created_at]
         );
-      } catch {}
+      } catch {
+        // User may already exist in local db cache
+      }
     }
 
     if (!user) {

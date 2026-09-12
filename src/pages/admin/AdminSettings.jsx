@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   Settings,
   HardDrive,
@@ -27,7 +27,7 @@ export function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const toast = useToast();
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.admin.getSettings();
@@ -38,11 +38,11 @@ export function AdminSettings() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     fetchSettings();
-  }, []);
+  }, [fetchSettings]);
 
   const handleSave = async (e) => {
     e.preventDefault();

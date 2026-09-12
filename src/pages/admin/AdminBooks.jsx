@@ -52,7 +52,7 @@ export function AdminBooks() {
     } finally {
       setLoading(false);
     }
-  }, [search, sortField, sortOrder, pagination.page, pagination.limit]);
+  }, [search, sortField, sortOrder, pagination.page, pagination.limit, toast]);
 
   useEffect(() => {
     fetchBooks();

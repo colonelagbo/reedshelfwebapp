@@ -41,7 +41,7 @@ export function AdminAuditLogs() {
     } finally {
       setLoading(false);
     }
-  }, [search, actionFilter, pagination.page, pagination.limit]);
+  }, [search, actionFilter, pagination.page, pagination.limit, toast]);
 
   useEffect(() => {
     fetchLogs();

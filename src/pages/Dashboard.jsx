@@ -7,18 +7,20 @@ import { getCurrentUser, getUserBooks, getProgress, getUserPlans, fetchBooks, fe
 
 export function Dashboard() {
   const user = getCurrentUser();
-  const [books, setBooks] = useState([]);
-  const [plans, setPlans] = useState([]);
+  const [books, setBooks] = useState(() => (user?.id ? getUserBooks(user.id) : []));
+  const [plans, setPlans] = useState(() => (user?.id ? getUserPlans(user.id) : []));
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!user?.id) return;
-    setBooks(getUserBooks(user.id));
-    setPlans(getUserPlans(user.id));
 
-    // Fetch fresh data from backend
-    fetchBooks().then((b) => b && setBooks(b)).catch(() => {});
-    fetchPlans().then((p) => p && setPlans(p)).catch(() => {});
+    fetchBooks().then((b) => {
+      if (b && Array.isArray(b)) setBooks(b);
+    }).catch(() => {});
+
+    fetchPlans().then((p) => {
+      if (p && Array.isArray(p)) setPlans(p);
+    }).catch(() => {});
   }, [user?.id]);
 
   const progress = (b) => {

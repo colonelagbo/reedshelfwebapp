@@ -15,7 +15,7 @@ export function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleAuthSuccess = (user) => {
+  const handleAuthSuccess = (_user) => {
     navigate(location.state?.from || '/app/home', { replace: true });
   };
 

@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import crypto from 'crypto';
 import { db } from '../db.js';
-import { supabaseStorage } from '../storage/supabase.js';
+import { supabaseStorage, getSupabaseClient } from '../storage/supabase.js';
 import { authenticateToken, optionalToken } from '../middleware/auth.js';
 
 export const booksRouter = express.Router();
@@ -23,30 +23,71 @@ const upload = multer({
 
 const uid = (prefix = 'book') => `${prefix}_${crypto.randomBytes(8).toString('hex')}_${Date.now()}`;
 
+function formatBookRow(b) {
+  return {
+    id: b.id,
+    title: b.title,
+    author: b.author,
+    fileName: b.file_name || b.fileName,
+    fileType: b.file_type || b.fileType || 'application/pdf',
+    size: Number(b.file_size || b.size || 0),
+    totalPages: Number(b.total_pages || b.totalPages || 0),
+    uploadedBy: b.uploaded_by || b.uploadedBy,
+    r2Key: b.r2_key || b.r2Key,
+    coverDataUrl: b.cover_data_url || b.coverDataUrl || null,
+    coverUrl: b.cover_url || b.coverUrl || null,
+    createdAt: b.created_at || b.createdAt,
+  };
+}
+
 // GET /api/books - Get user's books
-booksRouter.get('/', authenticateToken, (req, res) => {
+booksRouter.get('/', authenticateToken, async (req, res) => {
   try {
-    const books = db.all(
+    const supabase = getSupabaseClient();
+    let supabaseBooks = null;
+
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('books')
+          .select('*')
+          .eq('uploaded_by', req.user.id)
+          .order('created_at', { ascending: false });
+
+        if (!error && Array.isArray(data)) {
+          supabaseBooks = data.map(formatBookRow);
+          // Sync with local DB store
+          for (const sb of data) {
+            const existing = db.get('SELECT id FROM books WHERE id = ?', [sb.id]);
+            if (!existing) {
+              try {
+                db.run(
+                  `INSERT INTO books (id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [sb.id, sb.title, sb.author, sb.file_name, sb.file_type, sb.file_size, sb.total_pages, sb.uploaded_by, sb.r2_key, sb.cover_data_url, sb.cover_url, sb.created_at]
+                );
+              } catch {
+                // Ignore sync collisions
+              }
+            }
+          }
+        }
+      } catch (sbErr) {
+        console.warn('[Supabase Database Warning] Could not fetch books from Supabase DB:', sbErr.message);
+      }
+    }
+
+    if (supabaseBooks && supabaseBooks.length > 0) {
+      return res.json(supabaseBooks);
+    }
+
+    // Fallback to local DB store
+    const localBooks = db.all(
       'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? ORDER BY created_at DESC',
       [req.user.id]
     );
 
-    // Map database snake_case fields to frontend camelCase
-    const formatted = books.map((b) => ({
-      id: b.id,
-      title: b.title,
-      author: b.author,
-      fileName: b.file_name,
-      fileType: b.file_type,
-      size: b.file_size,
-      totalPages: b.total_pages,
-      uploadedBy: b.uploaded_by,
-      r2Key: b.r2_key,
-      coverDataUrl: b.cover_data_url,
-      coverUrl: b.cover_url,
-      createdAt: b.created_at,
-    }));
-
+    const formatted = localBooks.map(formatBookRow);
     res.json(formatted);
   } catch (err) {
     console.error('Error fetching books:', err);
@@ -55,34 +96,47 @@ booksRouter.get('/', authenticateToken, (req, res) => {
 });
 
 // GET /api/books/:id - Get a single book
-booksRouter.get('/:id', authenticateToken, (req, res) => {
+booksRouter.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const book = db.get('SELECT * FROM books WHERE id = ?', [req.params.id]);
+    let book = db.get('SELECT * FROM books WHERE id = ?', [req.params.id]);
+
+    if (!book) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { data } = await supabase.from('books').select('*').eq('id', req.params.id).single();
+          if (data) book = data;
+        } catch {
+          // Ignore
+        }
+      }
+    }
+
     if (!book) {
       return res.status(404).json({ error: 'Book not found.' });
     }
 
-    res.json({
-      id: book.id,
-      title: book.title,
-      author: book.author,
-      fileName: book.file_name,
-      fileType: book.file_type,
-      size: book.file_size,
-      totalPages: book.total_pages,
-      uploadedBy: book.uploaded_by,
-      r2Key: book.r2_key,
-      coverDataUrl: book.cover_data_url,
-      coverUrl: book.cover_url,
-      createdAt: book.created_at,
-    });
+    // Generate fresh signed URL if needed
+    const storageKey = book.r2_key || book.r2Key;
+    let freshSignedUrl = null;
+    if (storageKey) {
+      freshSignedUrl = await supabaseStorage.getSignedUrl(storageKey, 86400);
+    }
+
+    const formatted = formatBookRow(book);
+    if (freshSignedUrl) {
+      formatted.signedUrl = freshSignedUrl;
+      formatted.coverUrl = freshSignedUrl;
+    }
+
+    res.json(formatted);
   } catch (err) {
     console.error('Error fetching book:', err);
     res.status(500).json({ error: 'Failed to retrieve book.' });
   }
 });
 
-// POST /api/books/upload - Upload a PDF book to Supabase Storage
+// POST /api/books/upload - Upload a PDF book to Supabase Storage and Database
 booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
@@ -104,14 +158,55 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
 
     console.log(`[Upload] Uploading book "${title || file.originalname}" (${(file.size / (1024 * 1024)).toFixed(2)} MB) to Supabase Storage: ${storageKey}`);
 
-    // Upload PDF to Supabase Storage
+    // 1. Upload PDF to Supabase Storage
     const uploadResult = await supabaseStorage.upload(storageKey, file.buffer, 'application/pdf');
 
     const bookTitle = (title && title.trim()) || file.originalname.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim() || 'Untitled Book';
     const bookAuthor = (author && author.trim()) || 'Unknown author';
     const pages = parseInt(totalPages || '0', 10) || 0;
+    const finalCoverUrl = uploadResult.url || uploadResult.signedUrl || null;
 
-    // Save to Database
+    // 2. Persist to Supabase PostgreSQL Database if configured
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        // Ensure user row exists in public.users to satisfy foreign key (uploaded_by REFERENCES users(id))
+        await supabase.from('users').upsert({
+          id: req.user.id,
+          name: req.user.name || 'Reader',
+          email: req.user.email,
+          avatar: req.user.avatar || null,
+          role: req.user.role || 'user',
+          status: req.user.status || 'active',
+          created_at: req.user.created_at || createdAt,
+        }, { onConflict: 'id' });
+
+        const { error: insertErr } = await supabase.from('books').insert({
+          id: bookId,
+          title: bookTitle,
+          author: bookAuthor,
+          file_name: file.originalname,
+          file_type: file.mimetype || 'application/pdf',
+          file_size: file.size,
+          total_pages: pages,
+          uploaded_by: req.user.id,
+          r2_key: storageKey,
+          cover_data_url: coverDataUrl || null,
+          cover_url: finalCoverUrl,
+          created_at: createdAt,
+        });
+
+        if (insertErr) {
+          console.warn('[Supabase Database Warning] Note: books table insert returned:', insertErr.message);
+        } else {
+          console.log(`[Supabase Database] Successfully created book record in public.books: ${bookId}`);
+        }
+      } catch (dbErr) {
+        console.warn('[Supabase Database Warning] Could not insert to Supabase DB:', dbErr.message);
+      }
+    }
+
+    // 3. Save to local DB store for instantaneous sync
     db.run(
       `INSERT INTO books (
         id, title, author, file_name, file_type, file_size,
@@ -128,7 +223,7 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
         req.user.id,
         storageKey,
         coverDataUrl || null,
-        uploadResult.url || null,
+        finalCoverUrl,
         createdAt,
       ]
     );
@@ -144,11 +239,13 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
       uploadedBy: req.user.id,
       r2Key: storageKey,
       coverDataUrl: coverDataUrl || null,
-      coverUrl: uploadResult.url || null,
+      coverUrl: finalCoverUrl,
+      signedUrl: uploadResult.signedUrl || null,
       storageType: uploadResult.storageType,
       createdAt,
     };
 
+    console.log(`[Upload] Successfully stored book "${bookTitle}" with ID ${bookId}`);
     res.status(201).json(savedBook);
   } catch (err) {
     console.error('Book upload error:', err);
@@ -160,21 +257,34 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
 booksRouter.get('/:id/file', optionalToken, async (req, res) => {
   try {
     const bookId = req.params.id;
-    const book = db.get('SELECT * FROM books WHERE id = ?', [bookId]);
+    let book = db.get('SELECT * FROM books WHERE id = ?', [bookId]);
+
+    if (!book) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { data } = await supabase.from('books').select('*').eq('id', bookId).single();
+          if (data) book = data;
+        } catch {
+          // Ignore
+        }
+      }
+    }
 
     if (!book) {
       return res.status(404).json({ error: 'Book file not found.' });
     }
 
     const range = req.headers.range;
+    const storageKey = book.r2_key || book.r2Key;
     const { stream, contentLength, contentRange, contentType, statusCode } = await supabaseStorage.getStream(
-      book.r2_key,
+      storageKey,
       range
     );
 
     res.setHeader('Content-Type', contentType || 'application/pdf');
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(book.file_name)}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(book.file_name || book.fileName || 'book.pdf')}"`);
     res.setHeader('Cache-Control', 'public, max-age=86400');
 
     if (contentLength) {
@@ -195,9 +305,20 @@ booksRouter.get('/:id/file', optionalToken, async (req, res) => {
 });
 
 // PUT /api/books/:id - Update book metadata
-booksRouter.put('/:id', authenticateToken, (req, res) => {
+booksRouter.put('/:id', authenticateToken, async (req, res) => {
   try {
-    const book = db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [req.params.id, req.user.id]);
+    let book = db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [req.params.id, req.user.id]);
+    const supabase = getSupabaseClient();
+
+    if (!book && supabase) {
+      try {
+        const { data } = await supabase.from('books').select('*').eq('id', req.params.id).eq('uploaded_by', req.user.id).single();
+        if (data) book = data;
+      } catch {
+        // Ignore
+      }
+    }
+
     if (!book) {
       return res.status(404).json({ error: 'Book not found or access denied.' });
     }
@@ -205,46 +326,45 @@ booksRouter.put('/:id', authenticateToken, (req, res) => {
     const { title, author, totalPages, coverDataUrl } = req.body;
     const updates = [];
     const params = [];
+    const sbUpdates = {};
 
     if (title) {
       updates.push('title = ?');
       params.push(title.trim());
+      sbUpdates.title = title.trim();
     }
     if (author !== undefined) {
       updates.push('author = ?');
       params.push(author.trim());
+      sbUpdates.author = author.trim();
     }
     if (totalPages) {
+      const p = parseInt(totalPages, 10);
       updates.push('total_pages = ?');
-      params.push(parseInt(totalPages, 10));
+      params.push(p);
+      sbUpdates.total_pages = p;
     }
     if (coverDataUrl !== undefined) {
       updates.push('cover_data_url = ?');
       params.push(coverDataUrl);
+      sbUpdates.cover_data_url = coverDataUrl;
     }
 
-    if (updates.length === 0) {
-      return res.json(book);
+    if (updates.length > 0) {
+      params.push(req.params.id);
+      db.run(`UPDATE books SET ${updates.join(', ')} WHERE id = ?`, params);
+
+      if (supabase && Object.keys(sbUpdates).length > 0) {
+        try {
+          await supabase.from('books').update(sbUpdates).eq('id', req.params.id);
+        } catch {
+          // Supabase table update optional
+        }
+      }
     }
 
-    params.push(req.params.id);
-    db.run(`UPDATE books SET ${updates.join(', ')} WHERE id = ?`, params);
-
-    const updated = db.get('SELECT * FROM books WHERE id = ?', [req.params.id]);
-    res.json({
-      id: updated.id,
-      title: updated.title,
-      author: updated.author,
-      fileName: updated.file_name,
-      fileType: updated.file_type,
-      size: updated.file_size,
-      totalPages: updated.total_pages,
-      uploadedBy: updated.uploaded_by,
-      r2Key: updated.r2_key,
-      coverDataUrl: updated.cover_data_url,
-      coverUrl: updated.cover_url,
-      createdAt: updated.created_at,
-    });
+    const updated = db.get('SELECT * FROM books WHERE id = ?', [req.params.id]) || book;
+    res.json(formatBookRow(updated));
   } catch (err) {
     console.error('Error updating book:', err);
     res.status(500).json({ error: 'Failed to update book.' });
@@ -255,18 +375,42 @@ booksRouter.put('/:id', authenticateToken, (req, res) => {
 booksRouter.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const bookId = req.params.id;
-    const book = db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [bookId, req.user.id]);
+    let book = db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [bookId, req.user.id]);
+    const supabase = getSupabaseClient();
+
+    if (!book && supabase) {
+      try {
+        const { data } = await supabase.from('books').select('*').eq('id', bookId).eq('uploaded_by', req.user.id).single();
+        if (data) book = data;
+      } catch {
+        // Ignore
+      }
+    }
 
     if (!book) {
       return res.status(404).json({ error: 'Book not found or permission denied.' });
     }
 
+    const storageKey = book.r2_key || book.r2Key;
+
     // 1. Delete object from Supabase storage
-    if (book.r2_key) {
-      await supabaseStorage.delete(book.r2_key);
+    if (storageKey) {
+      await supabaseStorage.delete(storageKey);
     }
 
-    // 2. Cascade delete from database
+    // 2. Cascade delete from Supabase Database if table exists
+    if (supabase) {
+      try {
+        await supabase.from('reading_progress').delete().eq('book_id', bookId);
+        await supabase.from('highlights').delete().eq('book_id', bookId);
+        await supabase.from('reading_plans').delete().eq('book_id', bookId);
+        await supabase.from('books').delete().eq('id', bookId);
+      } catch (sbErr) {
+        console.warn('[Supabase Database Warning] Could not delete from Supabase DB:', sbErr.message);
+      }
+    }
+
+    // 3. Cascade delete from local DB
     db.run('DELETE FROM reading_progress WHERE book_id = ?', [bookId]);
     db.run('DELETE FROM highlights WHERE book_id = ?', [bookId]);
     db.run('DELETE FROM reading_plans WHERE book_id = ?', [bookId]);

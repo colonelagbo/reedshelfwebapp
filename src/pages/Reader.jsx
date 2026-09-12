@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import * as pdfjsLib from 'pdfjs-dist';
-import * as pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs';
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import 'pdfjs-dist/web/pdf_viewer.css';
 import {
   ArrowLeft,
@@ -38,21 +38,9 @@ import {
   saveBookFile
 } from '../lib/appStore';
 
-// 1. In-memory fallback worker ensures parsing NEVER fails even if Web Worker is blocked
+// Configure worker URL using Vite asset bundle with fallback
 if (typeof window !== 'undefined') {
-  window.pdfjsWorker = pdfjsWorker;
-}
-
-// 2. Set worker URL for multi-threaded worker offloading
-if (typeof window !== 'undefined') {
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url
-    ).toString();
-  } catch {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
-  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl || '/pdf.worker.min.mjs';
 }
 
 const HIGHLIGHT_COLORS = [
@@ -177,16 +165,16 @@ export function Reader() {
         }
       };
 
-      const doc = await loadingTask.promise;
+      // Safety timeout: abort if document parsing takes longer than 25 seconds
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Opening book timed out. The PDF file may be damaged or too large.')), 25000);
+      });
+
+      const doc = await Promise.race([loadingTask.promise, timeoutPromise]);
       setLoadProgress(100);
       setPdfDoc(doc);
       setTotalPages(doc.numPages);
 
-      // Look up the book fresh here instead of depending on the outer `book`
-      // variable, which is a new object reference on every render (it comes
-      // from getBooks() re-reading localStorage) and would otherwise make
-      // this whole callback - and the effect that calls it - re-run on every
-      // single re-render of the Reader (every page turn, highlight, etc.).
       const currentBook = getBooks().find((b) => b.id === bookId);
       if (currentBook && (!currentBook.totalPages || currentBook.totalPages !== doc.numPages)) {
         updateBook(bookId, { totalPages: doc.numPages });

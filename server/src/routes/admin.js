@@ -621,6 +621,7 @@ adminRouter.delete('/users/:id', async (req, res) => {
       success: true,
       message: `User ${targetUser.email} and all associated data have been permanently removed.`,
       deletedBooksCount: userBooks.length,
+      deletedFilesCount,
       cleanedBytes: totalBytesToClean,
       formattedCleaned: formatBytes(totalBytesToClean)
     });
@@ -794,7 +795,7 @@ adminRouter.put('/settings', (req, res) => {
     }
 
     if (allowRegistrations !== undefined) {
-      const val = Boolean(allowRegistrations) ? 'true' : 'false';
+      const val = allowRegistrations ? 'true' : 'false';
       db.run("INSERT OR REPLACE INTO admin_settings (key, value, updated_at) VALUES ('allow_registrations', ?, ?)", [val, now]);
       changes.push(`New registrations ${val === 'true' ? 'enabled' : 'disabled'}`);
     }
