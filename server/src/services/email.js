@@ -36,7 +36,9 @@ export function getTransporter() {
 
 export async function sendEmailVerificationCode({ email, name, code }) {
   const recipientName = (name && name.trim()) || 'Reader';
-  const fromAddress = process.env.EMAIL_FROM || process.env.SMTP_USER || 'ReedShelf Security <noreply@reedshelf.app>';
+  const targetEmail = String(email || '').trim().toLowerCase();
+  const smtpUser = (process.env.SMTP_USER || process.env.GMAIL_USER || '').trim();
+  const fromAddress = process.env.EMAIL_FROM || (smtpUser ? `"ReedShelf" <${smtpUser}>` : '"ReedShelf" <noreply@reedshelf.app>');
   const subject = `${code} is your ReedShelf verification code`;
 
   const htmlContent = `
@@ -123,9 +125,9 @@ If you did not request this, please ignore this email.
 `;
 
   // Skip external mailer for synthetic test addresses to preserve quota for real users
-  const isTestEmail = email.endsWith('@example.com') || email.endsWith('@test.com') || process.env.NODE_ENV === 'test';
+  const isTestEmail = targetEmail.endsWith('@example.com') || targetEmail.endsWith('@test.com') || process.env.NODE_ENV === 'test';
   if (isTestEmail) {
-    logConsoleVerification(email, code);
+    logConsoleVerification(targetEmail, code);
     return { success: true, mode: 'dev_console' };
   }
 
@@ -133,18 +135,20 @@ If you did not request this, please ignore this email.
 
   if (transporter) {
     try {
+      console.log(`[EMAIL SERVICE] Dispatching code ${code} to new user: ${targetEmail} (via sender: ${fromAddress})`);
       const info = await transporter.sendMail({
         from: fromAddress,
-        to: email,
+        to: targetEmail,
+        replyTo: fromAddress,
         subject,
         text: textContent,
         html: htmlContent
       });
-      console.log(`[EMAIL SERVICE] Verification email sent to ${email} via SMTP: ${info.messageId}`);
-      return { success: true, mode: 'smtp', messageId: info.messageId };
+      console.log(`[EMAIL SERVICE] Verification email successfully delivered to recipient ${targetEmail}: ${info.messageId}`);
+      return { success: true, mode: 'smtp', messageId: info.messageId, recipient: targetEmail };
     } catch (err) {
-      console.error(`[EMAIL SERVICE] Failed to send via SMTP to ${email}:`, err.message);
-      logConsoleVerification(email, code);
+      console.error(`[EMAIL SERVICE] Failed to send via SMTP to recipient ${targetEmail}:`, err.message);
+      logConsoleVerification(targetEmail, code);
       return { success: true, mode: 'fallback_console', error: err.message };
     }
   }
