@@ -12,21 +12,38 @@ async function run() {
   if (health.status !== 'healthy') throw new Error('Health check failed: ' + JSON.stringify(health));
   console.log('✓ API and Storage healthy:', health.supabaseStorage?.bucket);
 
-  // Test 2: Standard registration & login
-  console.log('\n[2/7] Testing User Registration...');
+  // Test 2: Email Authenticator Verification & User Registration
+  console.log('\n[2/7] Testing Email Authenticator Verification & Registration...');
   const testEmail = `testuser_${Date.now()}@example.com`;
+
+  // Request 6-digit email authenticator verification code
+  const sendRes = await fetch(`${API_BASE}/auth/send-verification`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: testEmail,
+      name: 'E2E Test User'
+    })
+  });
+  const sendData = await sendRes.json();
+  if (!sendData.success || !sendData.devCode) {
+    throw new Error('Send verification failed: ' + JSON.stringify(sendData));
+  }
+  console.log('✓ Received authenticator verification code for email:', sendData.devCode);
+
   const regRes = await fetch(`${API_BASE}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       name: 'E2E Test User',
       email: testEmail,
-      password: 'Password123!'
+      password: 'Password123!',
+      code: sendData.devCode
     })
   });
   const regData = await regRes.json();
   if (!regData.token) throw new Error('Registration failed: ' + JSON.stringify(regData));
-  console.log('✓ Registered user:', regData.user.email, 'ID:', regData.user.id);
+  console.log('✓ Registered user with verified email:', regData.user.email, 'ID:', regData.user.id);
   const userToken = regData.token;
 
   // Test 3: Authenticator 2FA Setup & Activation

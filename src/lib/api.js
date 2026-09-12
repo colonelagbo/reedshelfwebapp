@@ -81,10 +81,17 @@ async function apiRequest(endpoint, options = {}) {
 
 export const api = {
   auth: {
-    async register({ name, email, password }) {
+    async sendVerification({ email, name }) {
+      return await apiRequest('/api/auth/send-verification', {
+        method: 'POST',
+        body: JSON.stringify({ email, name }),
+      });
+    },
+
+    async register({ name, email, password, code, setup2FA }) {
       const res = await apiRequest('/api/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ name, email, password, code, setup2FA }),
       });
       if (res.token) authStorage.setToken(res.token);
       if (res.user) authStorage.setUser(res.user);

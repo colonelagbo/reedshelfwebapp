@@ -12,6 +12,8 @@ import {
   getOtpAuthUrl,
   getQrCodeUrl
 } from '../services/totp.js';
+import { sendEmailVerificationCode } from '../services/email.js';
+import { createVerification, verifyCode } from '../services/verification.js';
 
 export const authRouter = express.Router();
 
@@ -43,10 +45,69 @@ function generateTemp2FAToken(user) {
   );
 }
 
+// POST /api/auth/send-verification - Send 6-digit authenticator verification code to email
+authRouter.post('/send-verification', async (req, res) => {
+  try {
+    const { email, name } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email address is required.' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+
+    // Check if new registrations are disabled by admin
+    const allowReg = db.get("SELECT value FROM admin_settings WHERE key = 'allow_registrations'");
+    if (allowReg && allowReg.value === 'false') {
+      return res.status(403).json({ error: 'New user registrations are currently disabled by the administrator.' });
+    }
+
+    // Check if an account already exists with this email
+    const existing = db.get('SELECT id FROM users WHERE email = ?', [trimmedEmail]);
+    if (existing) {
+      return res.status(400).json({ error: 'An account with this email already exists. Please sign in instead.' });
+    }
+
+    const verif = createVerification(trimmedEmail);
+    if (!verif.allowed) {
+      return res.status(429).json({
+        error: verif.error,
+        remainingSeconds: verif.remainingSeconds
+      });
+    }
+
+    // Send email verification code
+    const emailResult = await sendEmailVerificationCode({
+      email: trimmedEmail,
+      name,
+      code: verif.code
+    });
+
+    const isDev = process.env.NODE_ENV !== 'production';
+
+    res.json({
+      success: true,
+      message: `A 6-digit verification code has been sent to ${trimmedEmail}.`,
+      email: trimmedEmail,
+      expiresAt: verif.expiresAt,
+      cooldownSeconds: verif.cooldownSeconds,
+      // Provide code in dev/test mode or if SMTP is in console fallback
+      ...(emailResult.mode !== 'smtp' || isDev ? { devCode: verif.code } : {})
+    });
+  } catch (err) {
+    console.error('Send verification error:', err);
+    res.status(500).json({ error: 'Failed to send verification code. Please check your connection and try again.' });
+  }
+});
+
 // POST /api/auth/register
 authRouter.post('/register', async (req, res) => {
   try {
-    const { name, email, password, setup2FA } = req.body;
+    const { name, email, password, code, setup2FA } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required.' });
@@ -56,13 +117,27 @@ authRouter.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
     }
 
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // Enforce email verification code before creating account
+    if (!code) {
+      return res.status(400).json({
+        error: 'Email verification code is required. Please verify your email before creating an account.',
+        requiresVerification: true
+      });
+    }
+
+    const verificationResult = verifyCode(trimmedEmail, code);
+    if (!verificationResult.valid) {
+      return res.status(400).json({ error: verificationResult.error });
+    }
+
     // Check if new registrations are disabled by admin
     const allowReg = db.get("SELECT value FROM admin_settings WHERE key = 'allow_registrations'");
     if (allowReg && allowReg.value === 'false') {
       return res.status(403).json({ error: 'New user registrations are currently disabled by the administrator.' });
     }
 
-    const trimmedEmail = email.trim().toLowerCase();
     const existing = db.get('SELECT id FROM users WHERE email = ?', [trimmedEmail]);
     if (existing) {
       return res.status(400).json({ error: 'An account with this email already exists.' });

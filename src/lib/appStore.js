@@ -41,29 +41,17 @@ export const setCurrentUser = (user) => {
   }
 };
 
-export async function registerUser({ name, email, password }) {
-  try {
-    const res = await api.auth.register({ name, email, password });
-    return res.user;
-  } catch (err) {
-    // If backend isn't reachable, fallback locally for offline preview
-    const users = getUsers();
-    if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
-      throw new Error('An account with this email already exists.');
-    }
-    const user = {
-      id: uid('user'),
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      password,
-      createdAt: new Date().toISOString(),
-      avatar: null,
-    };
-    write(USERS_KEY, [...users, user]);
-    localStorage.setItem(SESSION_KEY, user.id);
-    authStorage.setUser(user);
-    return user;
+export async function sendEmailVerification({ email, name }) {
+  return await api.auth.sendVerification({ email, name });
+}
+
+export async function registerUser({ name, email, password, code, setup2FA }) {
+  const res = await api.auth.register({ name, email, password, code, setup2FA });
+  if (res.user?.id) {
+    localStorage.setItem(SESSION_KEY, res.user.id);
+    authStorage.setUser(res.user);
   }
+  return res.user;
 }
 
 export async function loginUser({ email, password }) {

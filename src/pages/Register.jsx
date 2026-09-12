@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, Smartphone, Download } from 'lucide-react';
 import { AuthLayout } from '../components/AuthLayout';
-import { registerUser } from '../lib/appStore';
-import { GoogleAuthButton } from '../components/GoogleAuthButton';
+import { registerUser, sendEmailVerification } from '../lib/appStore';
+import { EmailVerificationModal } from '../components/EmailVerificationModal';
 import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
 
 export function Register() {
@@ -11,6 +11,8 @@ export function Register() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [devCode, setDevCode] = useState('');
   const [twoFactorData, setTwoFactorData] = useState(null);
   const navigate = useNavigate();
   const isStandalone = typeof window !== 'undefined' && (
@@ -26,6 +28,17 @@ export function Register() {
     e.preventDefault();
     setError('');
 
+    if (!form.name.trim()) {
+      setError('Please enter your name.');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(form.email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
     if (form.password.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
@@ -33,13 +46,36 @@ export function Register() {
 
     setLoading(true);
     try {
-      await registerUser(form);
-      handleAuthSuccess();
+      // Send 6-digit authenticator verification code to the email first
+      const res = await sendEmailVerification({
+        email: form.email.trim(),
+        name: form.name.trim()
+      });
+      setDevCode(res?.devCode || '');
+      setShowVerificationModal(true);
     } catch (err) {
-      setError(err.message || 'Registration failed. Please try again.');
+      setError(err.message || 'Failed to send verification code. Please check your email.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleVerifyAndRegister = async (code) => {
+    await registerUser({
+      name: form.name.trim(),
+      email: form.email.trim(),
+      password: form.password,
+      code
+    });
+    setShowVerificationModal(false);
+    handleAuthSuccess();
+  };
+
+  const handleResendCode = async () => {
+    return await sendEmailVerification({
+      email: form.email.trim(),
+      name: form.name.trim()
+    });
   };
 
   return (
@@ -178,33 +214,14 @@ export function Register() {
         >
           {loading ? (
             <>
-              <Loader2 size={18} className="animate-spin" /> Creating account...
+              <Loader2 size={18} className="animate-spin" /> Sending verification code...
             </>
           ) : (
-            'Sign up'
+            'Verify email & create account'
           )}
         </button>
 
-        {/* Divider */}
-        <div className="relative my-3 flex items-center justify-center pt-1">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-[#e4e1d6] dark:border-white/10" />
-          </div>
-          <span className="relative bg-white px-3 text-xs font-bold uppercase tracking-wider text-[#8b9a93] dark:bg-[#12232a] dark:text-white/40">
-            or
-          </span>
-        </div>
-
-        {/* Google Sign-up Button */}
-        <GoogleAuthButton
-          mode="signup"
-          onSuccess={(user) => handleAuthSuccess(user)}
-          onRequire2FA={(data) => setTwoFactorData(data)}
-          onError={(err) => setError(err)}
-          disabled={loading}
-        />
-
-        <div>
+        <div className="pt-2">
           <Link
             to="/sign-in"
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#063b5c] py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#0a4d74] dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
@@ -213,6 +230,17 @@ export function Register() {
           </Link>
         </div>
       </form>
+
+      {/* Email Authenticator Verification Modal before account is created */}
+      {showVerificationModal && (
+        <EmailVerificationModal
+          email={form.email.trim()}
+          devCode={devCode}
+          onVerify={handleVerifyAndRegister}
+          onResend={handleResendCode}
+          onCancel={() => setShowVerificationModal(false)}
+        />
+      )}
 
       {/* 2FA Verification Modal if existing 2FA account logs in */}
       {twoFactorData && (

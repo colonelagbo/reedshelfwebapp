@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '../components/AuthLayout';
 import { loginUser } from '../lib/appStore';
 import { Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, ArrowRight } from 'lucide-react';
-import { GoogleAuthButton } from '../components/GoogleAuthButton';
 import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
 
 export function Login() {
@@ -147,25 +146,6 @@ export function Login() {
             </>
           )}
         </button>
-
-        {/* Divider */}
-        <div className="relative my-4 flex items-center justify-center pt-1">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-[#e4e1d6] dark:border-white/10" />
-          </div>
-          <span className="relative bg-white px-3 text-xs font-bold uppercase tracking-wider text-[#8b9a93] dark:bg-[#12232a] dark:text-white/40">
-            or
-          </span>
-        </div>
-
-        {/* Google Sign-In Button */}
-        <GoogleAuthButton
-          mode="signin"
-          onSuccess={handleAuthSuccess}
-          onRequire2FA={(data) => setTwoFactorData(data)}
-          onError={(err) => setError(err)}
-          disabled={loading}
-        />
 
         {/* Create Account Button */}
         <div className="pt-2">
