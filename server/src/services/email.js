@@ -12,15 +12,8 @@ export function getTransporter() {
   const pass = rawPass.replace(/\s+/g, '').trim();
 
   if (user && pass) {
-    if (host === 'smtp.gmail.com' || user.endsWith('@gmail.com') || (!host && user)) {
-      cachedTransporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user, pass }
-      });
-      return cachedTransporter;
-    }
-
-    if (host) {
+    // If a custom SMTP host is explicitly specified (such as Brevo: smtp-relay.brevo.com)
+    if (host && host !== 'smtp.gmail.com') {
       cachedTransporter = nodemailer.createTransport({
         host,
         port,
@@ -29,6 +22,13 @@ export function getTransporter() {
       });
       return cachedTransporter;
     }
+
+    // Default to Gmail if host is smtp.gmail.com or not specified
+    cachedTransporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: { user, pass }
+    });
+    return cachedTransporter;
   }
 
   return null;
