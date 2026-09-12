@@ -1,5 +1,5 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { BookOpen, Home, Library, ListChecks, Settings, UserCircle, Upload, LogOut, Menu, X, Shield, Plus } from 'lucide-react';
+import { BookOpen, Home, Library, ListChecks, Settings, UserCircle, Upload, LogOut, Menu, X, Shield, Plus, Download } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getCurrentUser, logoutUser, getSettings, api } from '../lib/appStore';
 import { LogoPlaceholder } from './LogoPlaceholder';
@@ -18,6 +18,10 @@ export function AppShell({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState(() => getCurrentUser());
+  const isStandalone = typeof window !== 'undefined' && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true
+  );
 
   useEffect(() => {
     api.auth.getMe().then((res) => {
@@ -180,6 +184,19 @@ export function AppShell({ children }) {
                   <Shield size={19} />
                   Accounts & Admin
                 </NavLink>
+              )}
+              {!isStandalone && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'));
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-semibold text-[#009689] hover:bg-[#009689]/10 dark:text-[#5fc4b8] dark:hover:bg-[#009689]/20 transition"
+                >
+                  <Download size={19} />
+                  Install App
+                </button>
               )}
               <button
                 onClick={logout}

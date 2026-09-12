@@ -13,7 +13,9 @@ import {
   Loader2,
   ShieldCheck,
   Shield,
-  ArrowRight
+  ArrowRight,
+  Smartphone,
+  Download
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import {
@@ -296,6 +298,40 @@ export function Profile() {
               )}
             </div>
           </section>
+
+          {/* Progressive Web App Installation (hidden if already running in standalone mode) */}
+          {typeof window !== 'undefined' &&
+            !window.matchMedia('(display-mode: standalone)').matches &&
+            !window.navigator.standalone && (
+              <section className="rounded-3xl border border-[#e4e1d6] bg-white p-6 dark:border-white/10 dark:bg-[#142326] sm:p-8">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8] shrink-0">
+                    <Smartphone size={20} />
+                  </span>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h2 className="font-bold text-lg">Install Mobile & Desktop App</h2>
+                      <span className="inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                        PWA
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60 leading-relaxed">
+                      Install ReedShelf on your iPhone, Android, or PC for a full-screen, native app experience with offline shell access.
+                    </p>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'))}
+                        className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268] touch-manipulation"
+                      >
+                        <Download size={15} />
+                        Install ReedShelf App
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
 
           {/* Admin Console & Accounts Access (Only visible to verified admins) */}
           {currentUserData?.role === 'admin' && (

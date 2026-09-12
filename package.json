@@ -14,7 +14,9 @@
     "server:dev": "node --watch server/src/index.js",
     "start": "node server/src/index.js",
     "make-admin": "node server/scripts/makeAdmin.js",
-    "test:e2e": "node server/scripts/testE2E.js"
+    "test:e2e": "node server/scripts/testE2E.js",
+    "test:pwa": "node server/scripts/testPWA.js",
+    "icons:generate": "node server/scripts/generateIcons.js"
   },
   "dependencies": {
     "@radix-ui/react-toast": "^1.2.14",
@@ -48,6 +50,8 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.2.0",
-    "vite": "^7.0.0"
+    "sharp": "^0.35.4",
+    "vite": "^7.0.0",
+    "vite-plugin-pwa": "^1.3.0"
   }
 }

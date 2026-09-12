@@ -13,6 +13,8 @@ import { NotFound } from "./pages/NotFound";
 import { ProtectedRoute } from "./pages/ProtectedRoute";
 import { AuthCallback } from "./pages/AuthCallback";
 import { getCurrentUser } from "./lib/appStore";
+import { PWAPrompt } from "./components/PWAPrompt";
+import { OfflineBanner } from "./components/OfflineBanner";
 
 // Admin Console Imports
 import { AdminProtectedRoute } from "./pages/admin/AdminProtectedRoute";
@@ -35,6 +37,8 @@ function Protected({ children }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <OfflineBanner />
+      <PWAPrompt />
       <Routes>
         <Route path="/" element={<Navigate to="/sign-in" replace />} />
         <Route path="/sign-in" element={<GuestRoute><Login /></GuestRoute>} />
