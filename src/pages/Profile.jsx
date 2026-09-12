@@ -13,7 +13,6 @@ import {
   Loader2,
   ShieldCheck,
   Shield,
-  Key,
   ArrowRight
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
@@ -44,8 +43,6 @@ export function Profile() {
   const [changingPass, setChangingPass] = useState(false);
   const [show2FASetup, setShow2FASetup] = useState(false);
   const [disabling2FA, setDisabling2FA] = useState(false);
-  const [setupKey, setSetupKey] = useState('');
-  const [claimingAdmin, setClaimingAdmin] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -78,26 +75,6 @@ export function Profile() {
       setError(err.message || 'Failed to disable 2FA.');
     } finally {
       setDisabling2FA(false);
-    }
-  };
-
-  const handleClaimAdmin = async (e) => {
-    e.preventDefault();
-    setClaimingAdmin(true);
-    setError('');
-    setMessage('');
-    try {
-      const res = await api.admin.claimAdmin({ setupKey: setupKey.trim() });
-      if (res.user) {
-        setCurrentUserData(res.user);
-        setCurrentUser(res.user);
-      }
-      setMessage(res.message || 'Platform administrator privileges granted!');
-      setTimeout(() => setMessage(''), 3000);
-    } catch (err) {
-      setError(err.message || 'Failed to claim administrator access.');
-    } finally {
-      setClaimingAdmin(false);
     }
   };
 
@@ -320,66 +297,36 @@ export function Profile() {
             </div>
           </section>
 
-          {/* Admin Console & Accounts Access */}
-          <section className="rounded-3xl border border-[#e4e1d6] bg-white p-6 dark:border-white/10 dark:bg-[#142326] sm:p-8">
-            <div className="flex items-start gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fef3c7] text-[#92400e] dark:bg-[#451a03] dark:text-[#fcd34d] shrink-0">
-                <Shield size={20} />
-              </span>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h2 className="font-bold text-lg">Platform Administration</h2>
-                  <span
-                    className={`inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                      currentUserData?.role === 'admin'
-                        ? 'bg-[#fef3c7] text-[#92400e] dark:bg-[#451a03] dark:text-[#fcd34d]'
-                        : 'bg-black/5 text-[#6b7a77] dark:bg-white/10 dark:text-white/60'
-                    }`}
-                  >
-                    {currentUserData?.role === 'admin' ? 'Administrator' : 'Standard User'}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60 leading-relaxed">
-                  View and manage all registered user accounts, track storage allocations, and inspect reading analytics.
-                </p>
-
-                {currentUserData?.role === 'admin' ? (
+          {/* Admin Console & Accounts Access (Only visible to verified admins) */}
+          {currentUserData?.role === 'admin' && (
+            <section className="rounded-3xl border border-[#e4e1d6] bg-white p-6 dark:border-white/10 dark:bg-[#142326] sm:p-8">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fef3c7] text-[#92400e] dark:bg-[#451a03] dark:text-[#fcd34d] shrink-0">
+                  <Shield size={20} />
+                </span>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-bold text-lg">Platform Administration</h2>
+                    <span className="inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#fef3c7] text-[#92400e] dark:bg-[#451a03] dark:text-[#fcd34d]">
+                      Administrator
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60 leading-relaxed">
+                    View and manage all registered user accounts, track storage allocations, and inspect reading analytics.
+                  </p>
                   <div className="mt-4">
                     <Link
                       to="/admin/users"
                       className="inline-flex items-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268]"
                     >
-                      <span>View All Accounts in Admin Console</span>
+                      <span>Open Admin Console</span>
                       <ArrowRight size={14} />
                     </Link>
                   </div>
-                ) : (
-                  <form onSubmit={handleClaimAdmin} className="mt-4 max-w-md space-y-2.5">
-                    <p className="text-[11px] text-[#6b7a77] dark:text-white/50">
-                      To view all registered accounts, claim the administrator role below:
-                    </p>
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        placeholder="Setup key (e.g. ReedshelfAdmin2026!)"
-                        value={setupKey}
-                        onChange={(e) => setSetupKey(e.target.value)}
-                        className="flex-1 rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] px-3 py-2 text-xs outline-none focus:border-[#009689] dark:border-white/10 dark:bg-white/5 dark:text-white"
-                      />
-                      <button
-                        type="submit"
-                        disabled={claimingAdmin}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268] disabled:opacity-50 shrink-0"
-                      >
-                        {claimingAdmin ? <Loader2 size={14} className="animate-spin" /> : <Key size={14} />}
-                        <span>Claim Admin</span>
-                      </button>
-                    </div>
-                  </form>
-                )}
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl bg-[#f6f4ee] p-5 dark:bg-white/5">

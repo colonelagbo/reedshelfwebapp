@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { db } from '../db.js';
 import { supabaseStorage, getSupabaseClient } from '../storage/supabase.js';
 import { authenticateToken, optionalToken } from '../middleware/auth.js';
+import { syncBooksFromCloud, recordBook, removeBookFromCloud } from '../storage/cloudSync.js';
 
 export const booksRouter = express.Router();
 
@@ -43,6 +44,7 @@ function formatBookRow(b) {
 // GET /api/books - Get user's books
 booksRouter.get('/', authenticateToken, async (req, res) => {
   try {
+    await syncBooksFromCloud();
     const supabase = getSupabaseClient();
     let supabaseBooks = null;
 
@@ -82,10 +84,12 @@ booksRouter.get('/', authenticateToken, async (req, res) => {
     }
 
     // Fallback to local DB store
-    const localBooks = db.all(
-      'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? ORDER BY created_at DESC',
-      [req.user.id]
-    );
+    const localBooks = (req.user.role === 'admin')
+      ? db.all('SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books ORDER BY created_at DESC')
+      : db.all(
+          'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? OR uploaded_by = "demo_user" OR uploaded_by IS NULL ORDER BY created_at DESC',
+          [req.user.id]
+        );
 
     const formatted = localBooks.map(formatBookRow);
     res.json(formatted);
@@ -245,6 +249,8 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
       createdAt,
     };
 
+    await recordBook(savedBook);
+
     console.log(`[Upload] Successfully stored book "${bookTitle}" with ID ${bookId}`);
     res.status(201).json(savedBook);
   } catch (err) {
@@ -364,7 +370,9 @@ booksRouter.put('/:id', authenticateToken, async (req, res) => {
     }
 
     const updated = db.get('SELECT * FROM books WHERE id = ?', [req.params.id]) || book;
-    res.json(formatBookRow(updated));
+    const formattedUpdated = formatBookRow(updated);
+    await recordBook(formattedUpdated);
+    res.json(formattedUpdated);
   } catch (err) {
     console.error('Error updating book:', err);
     res.status(500).json({ error: 'Failed to update book.' });
@@ -398,7 +406,10 @@ booksRouter.delete('/:id', authenticateToken, async (req, res) => {
       await supabaseStorage.delete(storageKey);
     }
 
-    // 2. Cascade delete from Supabase Database if table exists
+    // 2. Remove from cloud sync metadata
+    await removeBookFromCloud(bookId);
+
+    // 3. Cascade delete from Supabase Database if table exists
     if (supabase) {
       try {
         await supabase.from('reading_progress').delete().eq('book_id', bookId);

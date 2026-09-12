@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { db } from '../db.js';
 import { config } from '../config.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { recordUser } from '../storage/cloudSync.js';
 import {
   generateSecret,
   verifyTOTP,
@@ -116,6 +117,13 @@ authRouter.post('/register', async (req, res) => {
       createdAt,
     };
 
+    await recordUser({
+      ...user,
+      password: hashedPassword,
+      two_factor_enabled: twoFactorEnabled,
+      two_factor_secret: twoFactorSecret,
+    });
+
     const token = generateToken(user);
     res.status(201).json({ token, user, twoFactorSetup });
   } catch (err) {
@@ -174,17 +182,28 @@ authRouter.post('/login', async (req, res) => {
       });
     }
 
+    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
+    let effectiveRole = user.role || 'user';
+    if (adminEmail && user.email.toLowerCase() === adminEmail) {
+      effectiveRole = 'admin';
+      if (user.role !== 'admin') {
+        db.run("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
+      }
+    }
+
     const userProfile = {
       id: user.id,
       name: user.name,
       email: user.email,
       avatar: user.avatar,
-      role: user.role || 'user',
+      role: effectiveRole,
       status: user.status || 'active',
       twoFactorEnabled: false,
       isGoogleUser: Boolean(user.google_id),
       createdAt: user.created_at,
     };
+
+    await recordUser({ ...user, role: effectiveRole });
 
     const token = generateToken(userProfile);
     res.json({ token, user: userProfile });
@@ -235,12 +254,21 @@ authRouter.post('/google', async (req, res) => {
         });
       }
 
+      const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
+      let effectiveRole = user.role || 'user';
+      if (adminEmail && user.email.toLowerCase() === adminEmail) {
+        effectiveRole = 'admin';
+        if (user.role !== 'admin') {
+          db.run("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
+        }
+      }
+
       const userProfile = {
         id: user.id,
         name: user.name,
         email: user.email,
         avatar: user.avatar,
-        role: user.role || 'user',
+        role: effectiveRole,
         status: user.status || 'active',
         twoFactorEnabled: false,
         isGoogleUser: true,
@@ -287,6 +315,8 @@ authRouter.post('/google', async (req, res) => {
       isGoogleUser: true,
       createdAt,
     };
+
+    await recordUser(newUserProfile);
 
     const token = generateToken(newUserProfile);
     res.status(201).json({ token, user: newUserProfile });
@@ -492,6 +522,15 @@ authRouter.post('/2fa/verify', async (req, res) => {
 authRouter.get('/me', authenticateToken, (req, res) => {
   try {
     const user = req.user;
+    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
+    let effectiveRole = user.role || 'user';
+    if (adminEmail && user.email.toLowerCase() === adminEmail) {
+      effectiveRole = 'admin';
+      if (user.role !== 'admin') {
+        db.run("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
+      }
+    }
+
     const books = db.all('SELECT id FROM books WHERE uploaded_by = ?', [user.id]);
     const plans = db.all('SELECT id FROM reading_plans WHERE user_id = ?', [user.id]);
     const progress = db.all('SELECT id FROM reading_progress WHERE user_id = ? AND page > 1', [user.id]);
@@ -502,7 +541,7 @@ authRouter.get('/me', authenticateToken, (req, res) => {
         name: user.name,
         email: user.email,
         avatar: user.avatar,
-        role: user.role || 'user',
+        role: effectiveRole,
         status: user.status || 'active',
         twoFactorEnabled: Boolean(user.two_factor_enabled),
         isGoogleUser: Boolean(user.google_id),

@@ -158,6 +158,8 @@ export const getBooks = () => read(BOOKS_KEY, []);
 export const getUserBooks = (userId) => {
   const books = getBooks();
   if (!userId) return books;
+  const user = getCurrentUser();
+  if (user?.role === 'admin') return books;
   return books.filter((b) => {
     const owner = b.uploadedBy || b.uploaded_by;
     return !owner || owner === userId || owner === 'demo_user';
@@ -165,14 +167,27 @@ export const getUserBooks = (userId) => {
 };
 
 export async function fetchBooks() {
+  const localBooks = getBooks();
+
   // 1. Try fetching from Backend API
   try {
     const books = await api.books.list();
     if (Array.isArray(books) && books.length > 0) {
-      write(BOOKS_KEY, books);
-      return books;
+      // Merge backend books with any local books not yet synced
+      const serverIds = new Set(books.map((b) => b.id));
+      const merged = [
+        ...books,
+        ...localBooks.filter((b) => !serverIds.has(b.id)),
+      ];
+      write(BOOKS_KEY, merged);
+      return merged;
     } else if (Array.isArray(books) && books.length === 0) {
-      // Check if Supabase direct has books before overwriting with []
+      // If we already have books locally, protect and keep them
+      if (localBooks.length > 0) {
+        return localBooks;
+      }
+
+      // Check if Supabase direct has books before writing empty array
       if (supabase) {
         const user = getCurrentUser();
         if (user?.id) {
@@ -205,10 +220,10 @@ export async function fetchBooks() {
           }
         }
       }
-      write(BOOKS_KEY, books);
-      return books;
+      write(BOOKS_KEY, []);
+      return [];
     }
-    return getBooks();
+    return localBooks;
   } catch (err) {
     console.warn('Could not fetch books from backend API, checking Supabase direct:', err.message);
   }
@@ -239,8 +254,13 @@ export async function fetchBooks() {
             coverUrl: b.cover_url,
             createdAt: b.created_at,
           }));
-          write(BOOKS_KEY, formatted);
-          return formatted;
+          const serverIds = new Set(formatted.map((b) => b.id));
+          const merged = [
+            ...formatted,
+            ...localBooks.filter((b) => !serverIds.has(b.id)),
+          ];
+          write(BOOKS_KEY, merged);
+          return merged;
         }
       }
     } catch (sbErr) {
@@ -249,7 +269,7 @@ export async function fetchBooks() {
   }
 
   // 3. Keep local books cache, never wipe out books on temporary network failure
-  return getBooks();
+  return localBooks;
 }
 
 export async function uploadBookFile(file, metadata) {

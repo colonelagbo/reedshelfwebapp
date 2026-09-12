@@ -270,6 +270,56 @@ export const supabaseStorage = {
   },
 
   /**
+   * Save persistent JSON metadata to Supabase Storage
+   * @param {string} filename - e.g. "users.json" or "books.json"
+   * @param {any} data
+   * @returns {Promise<boolean>}
+   */
+  async saveMetadata(filename, data) {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    try {
+      await ensureBucket();
+      const content = Buffer.from(JSON.stringify(data, null, 2));
+      const { error } = await client.storage
+        .from(config.supabase.bucketName)
+        .upload(`metadata/${filename}`, content, {
+          contentType: 'application/json',
+          upsert: true,
+        });
+      if (error) {
+        console.warn(`[Supabase Storage] Could not save metadata/${filename}:`, error.message);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn(`[Supabase Storage] saveMetadata error (${filename}):`, err.message);
+      return false;
+    }
+  },
+
+  /**
+   * Read persistent JSON metadata from Supabase Storage
+   * @param {string} filename - e.g. "users.json" or "books.json"
+   * @returns {Promise<any|null>}
+   */
+  async getMetadata(filename) {
+    const client = getSupabaseClient();
+    if (!client) return null;
+    try {
+      await ensureBucket();
+      const { data, error } = await client.storage
+        .from(config.supabase.bucketName)
+        .download(`metadata/${filename}`);
+      if (error || !data) return null;
+      const text = await data.text();
+      return JSON.parse(text);
+    } catch (_err) {
+      return null;
+    }
+  },
+
+  /**
    * Test connection to Supabase Storage with caching and timeout
    */
   async testConnection(forceRefresh = false) {

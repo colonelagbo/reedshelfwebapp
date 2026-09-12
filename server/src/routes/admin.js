@@ -7,6 +7,7 @@ import { supabaseStorage } from '../storage/supabase.js';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 import { requireAdmin } from '../middleware/auth.js';
+import { syncUsersFromCloud, syncBooksFromCloud, recordUser } from '../storage/cloudSync.js';
 
 export const adminRouter = express.Router();
 
@@ -63,6 +64,9 @@ function formatBytes(bytes, decimals = 2) {
 // ============================================================================
 adminRouter.get('/overview', async (req, res) => {
   try {
+    await syncUsersFromCloud();
+    await syncBooksFromCloud();
+
     const totalUsersRow = db.get('SELECT COUNT(*) as count FROM users');
     const totalUsers = totalUsersRow?.count || 0;
 
@@ -155,6 +159,8 @@ adminRouter.get('/overview', async (req, res) => {
 // ============================================================================
 adminRouter.get('/storage', async (req, res) => {
   try {
+    await syncUsersFromCloud();
+    await syncBooksFromCloud();
     const booksStat = db.get('SELECT COUNT(*) as count, COALESCE(SUM(file_size), 0) as size FROM books');
     const totalBooks = booksStat?.count || 0;
     const storageUsedBytes = Number(booksStat?.size || 0);
@@ -203,8 +209,10 @@ adminRouter.get('/storage', async (req, res) => {
 // ============================================================================
 // 3. GET /api/admin/storage/users (Detailed storage by user)
 // ============================================================================
-adminRouter.get('/storage/users', (req, res) => {
+adminRouter.get('/storage/users', async (req, res) => {
   try {
+    await syncUsersFromCloud();
+    await syncBooksFromCloud();
     const { search, role, status, sort = 'storage', order = 'desc', page = '1', limit = '20' } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10));
@@ -288,8 +296,10 @@ adminRouter.get('/storage/users', (req, res) => {
 // ============================================================================
 // 4. GET /api/admin/users (User management list)
 // ============================================================================
-adminRouter.get('/users', (req, res) => {
+adminRouter.get('/users', async (req, res) => {
   try {
+    await syncUsersFromCloud();
+    await syncBooksFromCloud();
     const { search, role, status, sort = 'date', order = 'desc', page = '1', limit = '20' } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10));
@@ -634,8 +644,9 @@ adminRouter.delete('/users/:id', async (req, res) => {
 // ============================================================================
 // 9. GET /api/admin/books (All books across platform)
 // ============================================================================
-adminRouter.get('/books', (req, res) => {
+adminRouter.get('/books', async (req, res) => {
   try {
+    await syncBooksFromCloud();
     const { search, sort = 'date', order = 'desc', page = '1', limit = '20' } = req.query;
 
     const pageNum = Math.max(1, parseInt(page, 10));
@@ -906,7 +917,7 @@ adminRouter.post('/setup-first-admin', (req, res) => {
 // ============================================================================
 // 14. POST /api/admin/claim-admin (Designate current authenticated user as admin)
 // ============================================================================
-adminRouter.post('/claim-admin', (req, res) => {
+adminRouter.post('/claim-admin', async (req, res) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required. Please sign in.' });
@@ -917,32 +928,25 @@ adminRouter.post('/claim-admin', (req, res) => {
     const userEmail = (req.user.email || '').trim().toLowerCase();
 
     const isMatchEmail = adminEmail && userEmail === adminEmail;
-    const isCorrectKey = setupKey === 'ReedshelfAdmin2026!' || setupKey === config.jwtSecret;
-    
-    // Check active admin count
-    const adminCountRow = db.get("SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND status = 'active'");
-    const activeAdmins = adminCountRow?.count || 0;
-    const isInitialSetup = activeAdmins === 0;
+    const isCorrectKey = setupKey && (setupKey === (process.env.ADMIN_SETUP_KEY || 'ReedshelfAdmin2026!') || setupKey === config.jwtSecret);
 
-    // Allow claim if matching email, using setup password, or initial setup, or if running in local dev mode
-    const isAllowed = isMatchEmail || isCorrectKey || isInitialSetup || !adminEmail || process.env.NODE_ENV !== 'production';
-
-    if (!isAllowed) {
+    if (!isMatchEmail && !isCorrectKey) {
       return res.status(403).json({
-        error: 'Administrator claim failed. Please enter the admin setup key (default: ReedshelfAdmin2026!) or sign in with the designated administrator account.'
+        error: 'Administrator claim failed. Unauthorized.'
       });
     }
 
     db.run("UPDATE users SET role = 'admin', status = 'active' WHERE id = ?", [req.user.id]);
 
+    const updatedUser = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [req.user.id]);
+    await recordUser(updatedUser);
+
     logAudit(req.user, 'admin.claim', {
       targetType: 'user',
       targetId: req.user.id,
       targetEmail: req.user.email,
-      details: `Account promoted to administrator (reason: ${isMatchEmail ? 'admin_email_match' : isCorrectKey ? 'valid_setup_key' : 'setup_allowed'})`
+      details: `Account promoted to administrator (reason: ${isMatchEmail ? 'admin_email_match' : 'valid_setup_key'})`
     });
-
-    const updatedUser = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [req.user.id]);
     const token = jwt.sign(
       {
         id: updatedUser.id,
