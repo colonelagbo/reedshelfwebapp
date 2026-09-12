@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, Smartphone, Download } from 'lucide-react';
 import { AuthLayout } from '../components/AuthLayout';
 import { registerUser } from '../lib/appStore';
 import { GoogleAuthButton } from '../components/GoogleAuthButton';
@@ -13,6 +13,10 @@ export function Register() {
   const [loading, setLoading] = useState(false);
   const [twoFactorData, setTwoFactorData] = useState(null);
   const navigate = useNavigate();
+  const isStandalone = typeof window !== 'undefined' && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true
+  );
 
   const handleAuthSuccess = () => {
     navigate('/app/home', { replace: true });
@@ -67,6 +71,32 @@ export function Register() {
         </p>
       }
     >
+      {!isStandalone && (
+        <div className="mb-4 flex items-center justify-between rounded-2xl border border-[#009689]/25 bg-[#e6f4f2]/70 p-2.5 sm:p-3 dark:border-[#009689]/30 dark:bg-[#009689]/15">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#009689] text-white shadow-2xs">
+              <Smartphone size={16} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-[#0b1619] dark:text-white truncate">
+                Get the ReedShelf App
+              </p>
+              <p className="text-[11px] text-[#557067] dark:text-white/60 truncate">
+                Install on phone for a faster reading experience
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'))}
+            className="inline-flex min-h-[36px] items-center gap-1 rounded-xl bg-[#009689] px-3 py-1.5 text-xs font-bold text-white shadow-2xs transition hover:bg-[#007268] active:scale-95 touch-manipulation shrink-0 ml-2"
+          >
+            <Download size={13} />
+            <span>Install</span>
+          </button>
+        </div>
+      )}
+
       <form onSubmit={submit} className="space-y-3.5">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block">

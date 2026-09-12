@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { Download } from 'lucide-react';
 import { LogoPlaceholder } from './LogoPlaceholder';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -16,10 +17,28 @@ export function AuthLayout({
   imageCaption = "“The reed bends to the breeze, yet stands forever rooted.”",
   imageSubcaption = "Built for mindful, grounding reading rituals.",
 }) {
+  const isStandalone = typeof window !== 'undefined' && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.navigator.standalone === true
+  );
+
   if (!split) {
     return (
       <div className="relative min-h-screen bg-[#f6f4ee] px-4 py-8 transition-colors duration-300 dark:bg-[#0b1619]">
-        <ThemeToggle className="absolute right-4 top-4 border-[#e4e1d6] text-[#557067] hover:border-[#009689] hover:text-[#009689] dark:border-white/15 dark:text-white/60 dark:hover:border-[#d6a84a] dark:hover:text-[#d6a84a]" />
+        <div className="absolute right-4 top-4 flex items-center gap-2 sm:gap-3">
+          {!isStandalone && (
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'))}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-[#009689]/30 bg-[#e6f4f2] px-3.5 py-1.5 text-xs font-bold text-[#007268] shadow-2xs transition hover:bg-[#009689] hover:text-white active:scale-95 dark:border-white/15 dark:bg-[#009689]/20 dark:text-[#5fc4b8] dark:hover:bg-[#009689] dark:hover:text-white touch-manipulation"
+              title="Install ReedShelf App"
+            >
+              <Download size={14} className="shrink-0" />
+              <span>Install App</span>
+            </button>
+          )}
+          <ThemeToggle className="border-[#e4e1d6] text-[#557067] hover:border-[#009689] hover:text-[#009689] dark:border-white/15 dark:text-white/60 dark:hover:border-[#d6a84a] dark:hover:text-[#d6a84a]" />
+        </div>
         <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md flex-col justify-center">
           <Link to="/" className="mx-auto mb-8"><LogoPlaceholder size="xl" /></Link>
           <div className="rounded-3xl border border-[#e4e1d6] bg-white p-6 shadow-xl shadow-[#0b1619]/5 dark:border-white/10 dark:bg-[#12232a] sm:p-8">
@@ -64,7 +83,7 @@ export function AuthLayout({
 
   return (
     <div className="relative min-h-[100dvh] w-full overflow-x-hidden bg-[#f6f4ee] px-4 py-4 sm:px-6 lg:px-12 transition-colors duration-300 dark:bg-[#0b1619] flex flex-col justify-between">
-      {/* Top Header Row with Theme Toggle */}
+      {/* Top Header Row with Theme Toggle & Install App Button */}
       <header className="w-full max-w-7xl mx-auto flex items-center justify-between pt-1 pb-2 sm:pb-4">
         {/* Mobile-only logo */}
         <div className="lg:hidden">
@@ -72,7 +91,18 @@ export function AuthLayout({
             <LogoPlaceholder size="md" />
           </Link>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          {!isStandalone && (
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'))}
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-[#009689]/30 bg-[#e6f4f2] px-3.5 py-1.5 text-xs font-bold text-[#007268] shadow-2xs transition hover:bg-[#009689] hover:text-white active:scale-95 dark:border-white/15 dark:bg-[#009689]/20 dark:text-[#5fc4b8] dark:hover:bg-[#009689] dark:hover:text-white touch-manipulation"
+              title="Install ReedShelf App"
+            >
+              <Download size={14} className="shrink-0" />
+              <span>Install App</span>
+            </button>
+          )}
           <ThemeToggle className="border-[#e4e1d6] text-[#557067] hover:border-[#009689] hover:text-[#009689] dark:border-white/15 dark:text-white/60 dark:hover:border-[#d6a84a] dark:hover:text-[#d6a84a]" />
         </div>
       </header>
