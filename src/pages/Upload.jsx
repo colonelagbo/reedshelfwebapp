@@ -127,61 +127,71 @@ export function Upload() {
       } catch (backendErr) {
         console.warn('Backend API upload notice, executing direct Supabase Storage & Database sync:', backendErr.message);
 
+        // If session expired or unauthenticated, prompt user to sign in
+        const isAuthError = backendErr.message && (
+          backendErr.message.toLowerCase().includes('auth') ||
+          backendErr.message.toLowerCase().includes('sign in') ||
+          backendErr.message.includes('401')
+        );
+        if (isAuthError) {
+          throw new Error('Your session has expired. Please sign in again before uploading.');
+        }
+
         if (supabase) {
           const bookId = `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
           const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
           const storageKey = `books/${currentUserId}/${bookId}/${safeName}`;
 
-          const { error: uploadErr } = await supabase.storage
-            .from('reedshelf-books')
-            .upload(storageKey, file, { contentType: 'application/pdf', upsert: true });
+          let directUploadSuccess = false;
+          let finalUrl = null;
 
-          if (uploadErr) {
-            throw new Error(`Supabase Storage upload failed: ${uploadErr.message}`);
-          }
-
-          const { data: publicUrlData } = supabase.storage.from('reedshelf-books').getPublicUrl(storageKey);
-          let directSignedUrl = null;
           try {
-            const { data: sData } = await supabase.storage.from('reedshelf-books').createSignedUrl(storageKey, 86400 * 7);
-            directSignedUrl = sData?.signedUrl;
-          } catch {
-            // Signed URL optional
-          }
+            const { error: uploadErr } = await supabase.storage
+              .from('reedshelf-books')
+              .upload(storageKey, file, { contentType: 'application/pdf', upsert: true });
 
-          const finalUrl = directSignedUrl || publicUrlData?.publicUrl || null;
-
-          // Try inserting into Supabase PostgreSQL books table
-          try {
-            await supabase.from('users').upsert({
-              id: currentUserId,
-              name: currentUser?.name || 'Reader',
-              email: currentUser?.email || 'reader@reedshelf.com',
-              created_at: new Date().toISOString(),
-            }, { onConflict: 'id' });
-
-            const { error: insertErr } = await supabase.from('books').insert({
-              id: bookId,
-              title,
-              author,
-              file_name: file.name,
-              file_type: file.type || 'application/pdf',
-              file_size: file.size,
-              total_pages: totalPages,
-              uploaded_by: currentUserId,
-              r2_key: storageKey,
-              cover_data_url: coverDataUrl,
-              cover_url: finalUrl,
-              created_at: new Date().toISOString(),
-            });
-
-            if (insertErr) {
-              console.warn('[Supabase DB Warning] Note: books table insert returned:', insertErr.message);
+            if (uploadErr) {
+              console.warn('[Supabase Storage Warning] Direct upload returned error:', uploadErr.message);
             } else {
-              console.log(`[Supabase DB] Successfully inserted book record: ${bookId}`);
+              directUploadSuccess = true;
+              const { data: publicUrlData } = supabase.storage.from('reedshelf-books').getPublicUrl(storageKey);
+              try {
+                const { data: sData } = await supabase.storage.from('reedshelf-books').createSignedUrl(storageKey, 86400 * 7);
+                finalUrl = sData?.signedUrl || publicUrlData?.publicUrl || null;
+              } catch {
+                finalUrl = publicUrlData?.publicUrl || null;
+              }
+
+              // Try inserting into Supabase PostgreSQL books table
+              try {
+                await supabase.from('users').upsert({
+                  id: currentUserId,
+                  name: currentUser?.name || 'Reader',
+                  email: currentUser?.email || 'reader@reedshelf.com',
+                  created_at: new Date().toISOString(),
+                }, { onConflict: 'id' });
+
+                await supabase.from('books').insert({
+                  id: bookId,
+                  title,
+                  author,
+                  file_name: file.name,
+                  file_type: file.type || 'application/pdf',
+                  file_size: file.size,
+                  total_pages: totalPages,
+                  uploaded_by: currentUserId,
+                  r2_key: storageKey,
+                  cover_data_url: coverDataUrl,
+                  cover_url: finalUrl,
+                  created_at: new Date().toISOString(),
+                });
+                console.log(`[Supabase DB] Successfully inserted book record: ${bookId}`);
+              } catch (sbInsertErr) {
+                console.warn('[Supabase DB Warning] Could not insert to Supabase DB:', sbInsertErr.message);
+              }
             }
-          } catch (sbInsertErr) {
-            console.warn('[Supabase DB Warning] Could not insert to Supabase DB:', sbInsertErr.message);
+          } catch (storageEx) {
+            console.warn('[Supabase Storage Exception] Direct upload failed:', storageEx.message);
           }
 
           book = addBook({
@@ -192,13 +202,29 @@ export function Upload() {
             fileType: file.type || 'application/pdf',
             size: file.size,
             uploadedBy: currentUserId,
-            r2Key: storageKey,
+            r2Key: directUploadSuccess ? storageKey : null,
             totalPages,
             coverDataUrl,
             coverUrl: finalUrl,
+            storageType: directUploadSuccess ? 'supabase' : 'local',
           });
         } else {
-          throw backendErr;
+          console.warn('Backend upload failed and Supabase is not configured directly on client, storing in local offline storage:', backendErr.message);
+          const bookId = `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
+          book = addBook({
+            id: bookId,
+            title,
+            author,
+            fileName: file.name,
+            fileType: file.type || 'application/pdf',
+            size: file.size,
+            uploadedBy: currentUserId,
+            r2Key: null,
+            totalPages,
+            coverDataUrl,
+            coverUrl: null,
+            storageType: 'local',
+          });
         }
       }
 
