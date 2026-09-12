@@ -81,11 +81,18 @@ authRouter.post('/send-verification', async (req, res) => {
     }
 
     // Send email verification code
-    const emailResult = await sendEmailVerificationCode({
-      email: trimmedEmail,
-      name,
-      code: verif.code
-    });
+    try {
+      await sendEmailVerificationCode({
+        email: trimmedEmail,
+        name,
+        code: verif.code
+      });
+    } catch (sendErr) {
+      console.error('Email dispatch error:', sendErr.message);
+      return res.status(502).json({
+        error: sendErr.message || 'Unable to deliver verification email. Please check your email address and try again.'
+      });
+    }
 
     res.json({
       success: true,
@@ -93,8 +100,8 @@ authRouter.post('/send-verification', async (req, res) => {
       email: trimmedEmail,
       expiresAt: verif.expiresAt,
       cooldownSeconds: verif.cooldownSeconds,
-      // Provide devCode only for test domains or when offline without SMTP/Supabase delivery
-      ...(emailResult.mode === 'dev_console' || trimmedEmail.endsWith('@example.com') ? { devCode: verif.code } : {})
+      // Only provide devCode for synthetic automated testing on @example.com
+      ...(trimmedEmail.endsWith('@example.com') ? { devCode: verif.code } : {})
     });
   } catch (err) {
     console.error('Send verification error:', err);

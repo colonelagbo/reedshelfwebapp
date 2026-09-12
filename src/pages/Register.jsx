@@ -12,7 +12,6 @@ export function Register() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
-  const [devCode, setDevCode] = useState('');
   const [twoFactorData, setTwoFactorData] = useState(null);
   const navigate = useNavigate();
   const isStandalone = typeof window !== 'undefined' && (
@@ -47,11 +46,10 @@ export function Register() {
     setLoading(true);
     try {
       // Send 6-digit authenticator verification code to the email first
-      const res = await sendEmailVerification({
+      await sendEmailVerification({
         email: form.email.trim(),
         name: form.name.trim()
       });
-      setDevCode(res?.devCode || '');
       setShowVerificationModal(true);
     } catch (err) {
       setError(err.message || 'Failed to send verification code. Please check your email.');
@@ -235,7 +233,6 @@ export function Register() {
       {showVerificationModal && (
         <EmailVerificationModal
           email={form.email.trim()}
-          devCode={devCode}
           onVerify={handleVerifyAndRegister}
           onResend={handleResendCode}
           onCancel={() => setShowVerificationModal(false)}

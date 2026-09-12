@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { Mail, ShieldCheck, AlertCircle, Loader2, ArrowLeft, RefreshCw, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Mail, ShieldCheck, AlertCircle, Loader2, ArrowLeft, RefreshCw, CheckCircle2 } from 'lucide-react';
 
 export function EmailVerificationModal({
   email,
-  devCode,
   onVerify,
   onResend,
   onCancel,
@@ -14,7 +13,6 @@ export function EmailVerificationModal({
   const [resending, setResending] = useState(false);
   const [cooldown, setCooldown] = useState(60);
   const [resendSuccess, setResendSuccess] = useState('');
-  const [currentDevCode, setCurrentDevCode] = useState(devCode || '');
   const inputRefs = useRef([]);
 
   // Resend cooldown timer
@@ -104,9 +102,6 @@ export function EmailVerificationModal({
     try {
       const res = await onResend();
       setCooldown(res?.cooldownSeconds || 60);
-      if (res?.devCode) {
-        setCurrentDevCode(res.devCode);
-      }
       setResendSuccess('A new verification code has been sent!');
       setTimeout(() => setResendSuccess(''), 4000);
     } catch (err) {
@@ -114,13 +109,6 @@ export function EmailVerificationModal({
     } finally {
       setResending(false);
     }
-  };
-
-  const fillDevCode = () => {
-    if (!currentDevCode || currentDevCode.length !== 6) return;
-    const parts = currentDevCode.split('');
-    setDigits(parts);
-    executeVerification(currentDevCode);
   };
 
   return (
@@ -200,25 +188,6 @@ export function EmailVerificationModal({
             ))}
           </div>
         </div>
-
-        {/* Dev Mode Auto-fill hint */}
-        {currentDevCode && (
-          <div className="mb-4 rounded-xl border border-teal-200 bg-teal-50/80 p-2.5 text-xs text-teal-900 dark:border-teal-900/40 dark:bg-teal-950/30 dark:text-teal-200">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1 text-[11px] font-medium">
-                <Sparkles size={13} className="text-[#009689]" />
-                Dev code: <strong className="font-mono">{currentDevCode}</strong>
-              </span>
-              <button
-                type="button"
-                onClick={fillDevCode}
-                className="rounded-lg bg-[#009689] px-2.5 py-1 text-[11px] font-bold text-white shadow-2xs hover:bg-[#007268] transition"
-              >
-                Auto-fill
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Submit Button */}
         <button
