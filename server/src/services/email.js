@@ -38,7 +38,16 @@ export async function sendEmailVerificationCode({ email, name, code }) {
   const recipientName = (name && name.trim()) || 'Reader';
   const targetEmail = String(email || '').trim().toLowerCase();
   const smtpUser = (process.env.SMTP_USER || process.env.GMAIL_USER || '').trim();
-  const fromAddress = process.env.EMAIL_FROM || (smtpUser ? `"ReedShelf" <${smtpUser}>` : '"ReedShelf" <noreply@reedshelf.app>');
+  const adminEmail = (process.env.ADMIN_EMAIL || '').trim();
+  const rawFrom = (process.env.EMAIL_FROM || '').trim();
+  
+  let fromAddress;
+  if (rawFrom && rawFrom.includes('@')) {
+    fromAddress = rawFrom.includes('<') ? rawFrom : `"ReedShelf" <${rawFrom}>`;
+  } else {
+    const verifiedEmail = smtpUser.includes('@smtp-brevo.com') ? adminEmail : (smtpUser || adminEmail || 'noreply@reedshelf.app');
+    fromAddress = `"ReedShelf" <${verifiedEmail}>`;
+  }
   const subject = `${code} is your ReedShelf verification code`;
 
   const htmlContent = `
