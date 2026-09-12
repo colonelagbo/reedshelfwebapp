@@ -7,8 +7,9 @@ export function getTransporter() {
 
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT) || 587;
-  const user = process.env.SMTP_USER || process.env.GMAIL_USER;
-  const pass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
+  const user = (process.env.SMTP_USER || process.env.GMAIL_USER || '').trim();
+  const rawPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || '';
+  const pass = rawPass.replace(/\s+/g, '').trim();
 
   if (host && user && pass) {
     cachedTransporter = nodemailer.createTransport({
