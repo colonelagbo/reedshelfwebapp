@@ -261,6 +261,10 @@ export const api = {
     async getStorageUsage() {
       return await apiRequest('/api/books/storage-usage');
     },
+
+    async getStorageConfig() {
+      return await apiRequest('/api/books/storage-config');
+    },
   },
 
   progress: {

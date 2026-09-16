@@ -85,6 +85,21 @@ booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/books/storage-config - Cloud storage configuration for direct client uploads
+booksRouter.get('/storage-config', optionalToken, async (req, res) => {
+  try {
+    const isConfigured = config.isSupabaseConfigured();
+    res.json({
+      configured: isConfigured,
+      url: config.supabase.url || 'https://xiiemdxbdrlzpvhaecmt.supabase.co',
+      key: config.supabase.key || '',
+      bucketName: config.supabase.bucketName || 'reedshelf-books',
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to retrieve storage configuration.' });
+  }
+});
+
 // GET /api/books - Get user's books (instantaneous from local server DB)
 booksRouter.get('/', authenticateToken, async (req, res) => {
   try {
