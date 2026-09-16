@@ -14,8 +14,9 @@ import {
 } from 'lucide-react';
 import { useEffect } from 'react';
 import { AppShell } from '../components/AppShell';
-import { addBook, getCurrentUser, getUserStorageUsage, saveBookFile, uploadBookFile } from '../lib/appStore';
+import { addBook, getCurrentUser, getUserStorageUsage, recordUploadedBook, saveBookFile, uploadBookFile, api } from '../lib/appStore';
 import { extractPdfInfo } from '../lib/pdfMetadata';
+import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 
 export function Upload() {
   const user = getCurrentUser();
@@ -137,50 +138,128 @@ export function Upload() {
       const currentUser = getCurrentUser();
       const currentUserId = currentUser?.id || user?.id || 'demo_user';
 
-      try {
-        book = await uploadBookFile(file, {
-          title,
-          author,
-          totalPages,
-          coverDataUrl,
-        });
-      } catch (backendErr) {
-        console.error('Upload error:', backendErr);
-
-        // If session expired or unauthenticated, prompt user to sign in
-        const isAuthError = backendErr.message && (
-          backendErr.message.toLowerCase().includes('auth') ||
-          backendErr.message.toLowerCase().includes('sign in') ||
-          backendErr.message.includes('401')
+      // 1. Storage quota check
+      const currentStorage = getUserStorageUsage(currentUserId);
+      if (file.size > currentStorage.remainingBytes) {
+        throw new Error(
+          `Upload exceeds your available account storage! You have ${currentStorage.remainingMB} MB remaining of your 50 MB quota. This file is ${(file.size / (1024 * 1024)).toFixed(1)} MB. Please delete existing books to free up space.`
         );
-        if (isAuthError) {
-          throw new Error('Your session has expired. Please sign in again before uploading.');
+      }
+
+      // 2. Direct Cloud Storage Upload (bypasses Vercel 4.5 MB FUNCTION_PAYLOAD_TOO_LARGE limit completely)
+      if (supabase && isSupabaseConfigured()) {
+        const bookId = `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
+        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const storageKey = `books/${currentUserId}/${bookId}/${safeName}`;
+
+        console.log(`[Upload] Uploading ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) directly to Cloud Storage...`);
+
+        const { error: uploadErr } = await supabase.storage
+          .from('reedshelf-books')
+          .upload(storageKey, file, { contentType: 'application/pdf', upsert: true });
+
+        if (uploadErr) {
+          throw new Error(`Cloud storage upload failed: ${uploadErr.message}`);
         }
 
-        const isNetworkOrOffline =
-          backendErr.message?.includes('Failed to fetch') ||
-          backendErr.message?.includes('NetworkError') ||
-          backendErr.message?.includes('Failed to load resource');
+        const { data: publicUrlData } = supabase.storage.from('reedshelf-books').getPublicUrl(storageKey);
+        const coverUrl = publicUrlData?.publicUrl || null;
 
-        if (isNetworkOrOffline) {
-          console.warn('Backend server unreachable, saving to local browser storage:', backendErr.message);
-          const bookId = `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
-          book = addBook({
+        try {
+          // Send lightweight JSON (< 2 KB) to backend to register book & verify quota
+          book = await api.books.recordBook({
             id: bookId,
             title,
             author,
             fileName: file.name,
             fileType: file.type || 'application/pdf',
             size: file.size,
-            uploadedBy: currentUserId,
-            r2Key: null,
+            totalPages,
+            storageKey,
+            coverDataUrl,
+            coverUrl,
+          });
+          recordUploadedBook(book);
+        } catch (recordErr) {
+          // If server rejects (e.g. quota check failed), clean up cloud file
+          try {
+            await supabase.storage.from('reedshelf-books').remove([storageKey]);
+          } catch {}
+
+          const isNetworkOrOffline =
+            recordErr.message?.includes('Failed to fetch') ||
+            recordErr.message?.includes('NetworkError');
+
+          if (isNetworkOrOffline) {
+            book = addBook({
+              id: bookId,
+              title,
+              author,
+              fileName: file.name,
+              fileType: file.type || 'application/pdf',
+              size: file.size,
+              uploadedBy: currentUserId,
+              r2Key: storageKey,
+              totalPages,
+              coverDataUrl,
+              coverUrl,
+              storageType: 'supabase',
+            });
+          } else {
+            throw recordErr;
+          }
+        }
+      } else {
+        // Fallback for environments without Supabase configured
+        if (file.size > 4.5 * 1024 * 1024) {
+          throw new Error('This file exceeds 4.5 MB. Direct server upload on serverless platforms is limited to 4.5 MB. Please configure Supabase cloud storage.');
+        }
+
+        try {
+          book = await uploadBookFile(file, {
+            title,
+            author,
             totalPages,
             coverDataUrl,
-            coverUrl: null,
-            storageType: 'local',
           });
-        } else {
-          throw backendErr;
+        } catch (backendErr) {
+          console.error('Upload error:', backendErr);
+
+          // If session expired or unauthenticated, prompt user to sign in
+          const isAuthError = backendErr.message && (
+            backendErr.message.toLowerCase().includes('auth') ||
+            backendErr.message.toLowerCase().includes('sign in') ||
+            backendErr.message.includes('401')
+          );
+          if (isAuthError) {
+            throw new Error('Your session has expired. Please sign in again before uploading.');
+          }
+
+          const isNetworkOrOffline =
+            backendErr.message?.includes('Failed to fetch') ||
+            backendErr.message?.includes('NetworkError') ||
+            backendErr.message?.includes('Failed to load resource');
+
+          if (isNetworkOrOffline) {
+            console.warn('Backend server unreachable, saving to local browser storage:', backendErr.message);
+            const bookId = `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
+            book = addBook({
+              id: bookId,
+              title,
+              author,
+              fileName: file.name,
+              fileType: file.type || 'application/pdf',
+              size: file.size,
+              uploadedBy: currentUserId,
+              r2Key: null,
+              totalPages,
+              coverDataUrl,
+              coverUrl: null,
+              storageType: 'local',
+            });
+          } else {
+            throw backendErr;
+          }
         }
       }
 

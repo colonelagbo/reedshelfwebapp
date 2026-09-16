@@ -291,6 +291,14 @@ export function addBook(book) {
   return item;
 }
 
+export function recordUploadedBook(book) {
+  if (!book || !book.id) return book;
+  const current = getBooks();
+  write(BOOKS_KEY, [book, ...current.filter((b) => b.id !== book.id)]);
+  notifyBooksChanged();
+  return book;
+}
+
 export async function updateBook(id, changes) {
   try {
     await api.books.update(id, changes);
@@ -722,7 +730,63 @@ export async function getBookFile(bookId) {
     return cloneFileData(memoryFileCache.get(bookId));
   }
 
-  // 2. Try fetching from Backend stream
+  // 2. Check local IndexedDB storage (instantaneous 0-1ms without network)
+  try {
+    const db = await openDb();
+    const result = await new Promise((resolve, reject) => {
+      const tx = db.transaction('files', 'readonly');
+      const req = tx.objectStore('files').get(bookId);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    if (result) {
+      memoryFileCache.set(bookId, result);
+      return cloneFileData(result);
+    }
+  } catch (err) {
+    console.warn('Notice reading file from IndexedDB:', err);
+  }
+
+  // 3. If not in local cache, fetch directly from cloud CDN / Supabase Storage
+  const all = getBooks();
+  const b = all.find((x) => x.id === bookId);
+  const storageKey = b?.r2Key || b?.r2_key;
+
+  // 3a. If book has a direct public CDN URL
+  if (b?.coverUrl && b.coverUrl.startsWith('http')) {
+    try {
+      const resp = await fetch(b.coverUrl);
+      if (resp.ok) {
+        const ab = await resp.arrayBuffer();
+        if (ab && ab.byteLength > 0) {
+          memoryFileCache.set(bookId, ab);
+          saveBookFile(bookId, ab).catch(() => {});
+          return cloneFileData(ab);
+        }
+      }
+    } catch (urlErr) {
+      console.warn(`[Reader] CDN URL fetch notice for book ${bookId}:`, urlErr.message);
+    }
+  }
+
+  // 3b. Direct download from Supabase Storage client
+  if (storageKey && supabase) {
+    try {
+      const { data: blob, error: dlError } = await supabase.storage.from('reedshelf-books').download(storageKey);
+      if (!dlError && blob) {
+        const ab = await blob.arrayBuffer();
+        if (ab && ab.byteLength > 0) {
+          memoryFileCache.set(bookId, ab);
+          saveBookFile(bookId, ab).catch(() => {});
+          return cloneFileData(ab);
+        }
+      }
+    } catch (sbErr) {
+      console.warn(`[Reader] Supabase direct download notice for book ${bookId}:`, sbErr.message);
+    }
+  }
+
+  // 4. Try fetching from Backend stream endpoint
   try {
     const arrayBuffer = await api.books.getFileData(bookId);
     if (arrayBuffer && arrayBuffer.byteLength > 0) {
@@ -734,59 +798,7 @@ export async function getBookFile(bookId) {
     console.warn(`[Reader] Backend streaming notice for book ${bookId}:`, err.message);
   }
 
-  // 3. Try fetching directly from Supabase Storage
-  try {
-    const all = getBooks();
-    const b = all.find((x) => x.id === bookId);
-    const storageKey = b?.r2Key || b?.r2_key;
-
-    if (storageKey && supabase) {
-      const { data: blob, error: dlError } = await supabase.storage.from('reedshelf-books').download(storageKey);
-      if (!dlError && blob) {
-        const ab = await blob.arrayBuffer();
-        if (ab && ab.byteLength > 0) {
-          memoryFileCache.set(bookId, ab);
-          saveBookFile(bookId, ab).catch(() => {});
-          return cloneFileData(ab);
-        }
-      }
-    }
-
-    if (b?.coverUrl && b.coverUrl.includes('/storage/v1/object/')) {
-      const resp = await fetch(b.coverUrl);
-      if (resp.ok) {
-        const ab = await resp.arrayBuffer();
-        if (ab && ab.byteLength > 0) {
-          memoryFileCache.set(bookId, ab);
-          saveBookFile(bookId, ab).catch(() => {});
-          return cloneFileData(ab);
-        }
-      }
-    }
-  } catch (sbErr) {
-    console.warn(`[Reader] Could not download book ${bookId} directly from Supabase:`, sbErr.message);
-  }
-
-  // 4. Check IndexedDB
-  try {
-    const db = await openDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('files', 'readonly');
-      const req = tx.objectStore('files').get(bookId);
-      req.onsuccess = () => {
-        const result = req.result || null;
-        if (result) {
-          memoryFileCache.set(bookId, result);
-        }
-        resolve(result ? cloneFileData(result) : null);
-      };
-      req.onerror = () => reject(req.error);
-    });
-  } catch (err) {
-    console.warn('Error reading file from IndexedDB:', err);
-    const cached = memoryFileCache.get(bookId);
-    return cached ? cloneFileData(cached) : null;
-  }
+  return null;
 }
 
 export async function deleteBookFile(bookId) {

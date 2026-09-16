@@ -209,6 +209,13 @@ export const api = {
       });
     },
 
+    async recordBook(data) {
+      return await apiRequest('/api/books/record', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    },
+
     getFileUrl(id) {
       const token = authStorage.getToken();
       return token ? `/api/books/${id}/file?token=${encodeURIComponent(token)}` : `/api/books/${id}/file`;

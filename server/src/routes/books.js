@@ -246,7 +246,120 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
   }
 });
 
-// GET /api/books/:id/file - Stream PDF file directly from Local Server Disk Storage
+// POST /api/books/record - Record book metadata after direct cloud storage upload (bypasses Vercel 4.5MB payload limit)
+booksRouter.post('/record', authenticateToken, async (req, res) => {
+  try {
+    const {
+      id,
+      title,
+      author,
+      fileName,
+      fileType,
+      size,
+      totalPages,
+      r2Key,
+      storageKey,
+      coverDataUrl,
+      coverUrl,
+    } = req.body;
+
+    const bookId = id || uid('book');
+    const finalStorageKey = r2Key || storageKey || `books/${req.user.id}/${bookId}/${(fileName || 'book.pdf').replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const fileSize = Number(size || 0);
+
+    // Storage quota check: 50 MB allotted per account
+    const usageRow = db.get(
+      'SELECT COALESCE(SUM(file_size), 0) as totalBytes FROM books WHERE uploaded_by = ?',
+      [req.user.id]
+    );
+    const currentUsedBytes = Number(usageRow?.totalBytes || 0);
+
+    if (currentUsedBytes + fileSize > ACCOUNT_STORAGE_LIMIT_BYTES) {
+      const currentUsedMB = (currentUsedBytes / (1024 * 1024)).toFixed(1);
+      const newFileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+      const remainingMB = Math.max(0, (ACCOUNT_STORAGE_LIMIT_BYTES - currentUsedBytes) / (1024 * 1024)).toFixed(1);
+      return res.status(400).json({
+        error: `Account storage limit exceeded! Each account has 50 MB allotted. You have used ${currentUsedMB} MB (${remainingMB} MB remaining). This book is ${newFileSizeMB} MB. Please delete existing books to free up space.`
+      });
+    }
+
+    const createdAt = new Date().toISOString();
+    const bookTitle = (title && title.trim()) || (fileName ? fileName.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim() : 'Untitled Book');
+    const bookAuthor = (author && author.trim()) || 'Unknown author';
+    const pages = parseInt(totalPages || '0', 10) || 0;
+    const finalCoverUrl = coverUrl || `/api/books/${bookId}/file`;
+
+    // 1. Persist to local database
+    db.run(
+      `INSERT INTO books (
+        id, title, author, file_name, file_type, file_size,
+        total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        bookId,
+        bookTitle,
+        bookAuthor,
+        fileName || 'book.pdf',
+        fileType || 'application/pdf',
+        fileSize,
+        pages,
+        req.user.id,
+        finalStorageKey,
+        coverDataUrl || null,
+        finalCoverUrl,
+        createdAt,
+      ]
+    );
+
+    // 2. Also register in cloud storage sync metadata
+    const savedBook = {
+      id: bookId,
+      title: bookTitle,
+      author: bookAuthor,
+      fileName: fileName || 'book.pdf',
+      fileType: fileType || 'application/pdf',
+      size: fileSize,
+      totalPages: pages,
+      uploadedBy: req.user.id,
+      r2Key: finalStorageKey,
+      coverDataUrl: coverDataUrl || null,
+      coverUrl: finalCoverUrl,
+      signedUrl: finalCoverUrl,
+      storageType: 'supabase',
+      createdAt,
+    };
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('books').upsert({
+          id: bookId,
+          title: bookTitle,
+          author: bookAuthor,
+          file_name: fileName || 'book.pdf',
+          file_type: fileType || 'application/pdf',
+          file_size: fileSize,
+          total_pages: pages,
+          uploaded_by: req.user.id,
+          r2_key: finalStorageKey,
+          cover_data_url: coverDataUrl || null,
+          cover_url: finalCoverUrl,
+          created_at: createdAt,
+        });
+      } catch (sbErr) {
+        console.warn('[Supabase Sync Warning] Could not sync to Supabase table:', sbErr.message);
+      }
+    }
+
+    console.log(`[Record] Successfully recorded book "${bookTitle}" (${(fileSize / (1024 * 1024)).toFixed(2)} MB) for user ${req.user.id}`);
+    res.status(201).json(savedBook);
+  } catch (err) {
+    console.error('Book record error:', err);
+    res.status(500).json({ error: `Failed to record book: ${err.message}` });
+  }
+});
+
+// GET /api/books/:id/file - Stream PDF file directly from Local Storage or redirect to high-speed CDN
 booksRouter.get('/:id/file', optionalToken, async (req, res) => {
   try {
     const bookId = req.params.id;
@@ -259,10 +372,10 @@ booksRouter.get('/:id/file', optionalToken, async (req, res) => {
     const range = req.headers.range;
     const storageKey = book.r2_key || book.r2Key;
 
-    try {
-      // 1. Stream directly from high-performance local server disk storage
+    // 1. If file exists on local disk storage, stream directly with range support
+    if (storageKey && localStorageService.fileExists(storageKey)) {
       const { stream, contentLength, contentRange, contentType, statusCode } = await localStorageService.getStream(
-        storageKey || `books/${book.uploaded_by}/${book.id}_${book.file_name}`,
+        storageKey,
         range
       );
 
@@ -271,35 +384,30 @@ booksRouter.get('/:id/file', optionalToken, async (req, res) => {
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(book.file_name || book.fileName || 'book.pdf')}"`);
       res.setHeader('Cache-Control', 'public, max-age=86400');
 
-      if (contentLength !== undefined) {
-        res.setHeader('Content-Length', contentLength);
-      }
-      if (contentRange) {
-        res.setHeader('Content-Range', contentRange);
-      }
+      if (contentLength !== undefined) res.setHeader('Content-Length', contentLength);
+      if (contentRange) res.setHeader('Content-Range', contentRange);
 
       res.status(statusCode || 200);
       return stream.pipe(res);
-    } catch (localErr) {
-      console.warn(`[Streaming] Local file not found for book ${bookId} (${localErr.message}), checking remote fallback...`);
-
-      // 2. Fallback to Supabase Storage if legacy file
-      if (storageKey) {
-        const { stream, contentLength, contentRange, contentType, statusCode } = await supabaseStorage.getStream(
-          storageKey,
-          range
-        );
-        res.setHeader('Content-Type', contentType || 'application/pdf');
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(book.file_name || book.fileName || 'book.pdf')}"`);
-        res.setHeader('Cache-Control', 'public, max-age=86400');
-        if (contentLength !== undefined) res.setHeader('Content-Length', contentLength);
-        if (contentRange) res.setHeader('Content-Range', contentRange);
-        res.status(statusCode || 200);
-        return stream.pipe(res);
-      }
-      throw localErr;
     }
+
+    // 2. Direct high-speed CDN redirect for Supabase Storage (zero serverless memory or latency)
+    if (storageKey) {
+      const client = getSupabaseClient();
+      if (client) {
+        const { data } = client.storage.from(config.supabase.bucketName).getPublicUrl(storageKey);
+        if (data?.publicUrl) {
+          return res.redirect(302, data.publicUrl);
+        }
+      }
+    }
+
+    // 3. If book has direct coverUrl pointing to CDN, redirect
+    if (book.cover_url && book.cover_url.startsWith('http')) {
+      return res.redirect(302, book.cover_url);
+    }
+
+    return res.status(404).json({ error: 'Book file not found on storage.' });
   } catch (err) {
     console.error(`Error streaming book file ${req.params.id}:`, err.message);
     if (!res.headersSent) {
