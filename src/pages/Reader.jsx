@@ -25,6 +25,7 @@ import {
   Coffee,
   RotateCcw,
   Pause,
+  Play,
   Target,
   CheckCircle2
 } from 'lucide-react';
@@ -99,9 +100,11 @@ export function Reader() {
   const [totalPages, setTotalPages] = useState(book?.totalPages || 1);
   const [currentPage, setCurrentPage] = useState(() => (user && bookId ? getProgress(user.id, bookId).page : 1));
   const [scale, setScale] = useState(1.0);
-  const [fitMode, setFitMode] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'width' : 'page'));
+  // Default to 'page' so the opened book always fits perfectly to the screen display
+  const [fitMode, setFitMode] = useState('page');
   const [readerTheme, setReaderTheme] = useState('dark');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showSwipeReminder, setShowSwipeReminder] = useState(false);
 
   const [highlights, setHighlights] = useState(() => (user && bookId ? getHighlights(user.id, bookId) : []));
   const [activeColor, setActiveColor] = useState(HIGHLIGHT_COLORS[0].value);
@@ -122,6 +125,7 @@ export function Reader() {
   const lastTapRef = useRef({ time: 0, x: 0, y: 0 });
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
   const fileInputRef = useRef(null);
+  const reminderTimeoutRef = useRef(null);
 
   const themeConfig = THEMES[readerTheme] || THEMES.dark;
 
@@ -130,12 +134,45 @@ export function Reader() {
     setTimeout(() => setToastMessage(''), 2500);
   }, []);
 
-  const handlePauseTillTomorrow = () => {
-    if (user && bookId) {
-      saveProgress(user.id, bookId, currentPage);
+  // Exit Book Handler - saves progress, exits fullscreen, and navigates reliably
+  const handleExitBook = useCallback((e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
     }
-    setShowQuotaModal(false);
+    // 1. Immediately persist reading progress
+    if (user?.id && bookId) {
+      try {
+        saveProgress(user.id, bookId, currentPage);
+      } catch (err) {
+        console.warn('Error saving progress on exit:', err);
+      }
+    }
+    // 2. Safely exit fullscreen if currently active
+    if (document.fullscreenElement) {
+      try {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      } catch {
+        // ignore
+      }
+    }
+    // 3. React Router navigation
     navigate('/app/library');
+    // 4. Guaranteed fallback navigation if router transition is interrupted
+    setTimeout(() => {
+      if (window.location.pathname.includes('/reader/')) {
+        window.location.href = '/app/library';
+      }
+    }, 150);
+  }, [user, bookId, currentPage, navigate]);
+
+  const handlePauseTillTomorrow = () => {
+    setShowQuotaModal(false);
+    handleExitBook();
   };
 
   const handleKeepGoing = () => {
@@ -241,7 +278,7 @@ export function Reader() {
     }
   }, [currentPage, user, bookId, loading]);
 
-  // 3. Render current page on canvas + TextLayer
+  // 3. Render current page on canvas + TextLayer with perfect screen display fit
   const renderPage = useCallback(async () => {
     if (!pdfDoc || !canvasRef.current) return;
 
@@ -257,26 +294,37 @@ export function Reader() {
     try {
       const page = await pdfDoc.getPage(currentPage);
       const container = containerRef.current;
+      
+      // Calculate available container dimensions
       const containerWidth = container?.clientWidth || window.innerWidth;
-      const containerHeight = container?.clientHeight || window.innerHeight;
+      // Subtract header (~56px) and footer (~44px) + margin if clientHeight is unmeasured
+      const containerHeight = (container?.clientHeight && container.clientHeight > 120)
+        ? container.clientHeight
+        : Math.max(300, window.innerHeight - 104);
+
       const unscaledViewport = page.getViewport({ scale: 1.0 });
 
+      // Clean padding around the page so it fits comfortably within the screen bezels
+      const padX = containerWidth < 640 ? 10 : 24;
+      const padY = containerHeight < 640 ? 10 : 20;
+
+      const availableWidth = Math.max(160, containerWidth - padX * 2);
+      const availableHeight = Math.max(160, containerHeight - padY * 2);
+
+      const scaleW = availableWidth / unscaledViewport.width;
+      const scaleH = availableHeight / unscaledViewport.height;
+
       let currentScale = scale;
-      if (fitMode === 'width') {
-        const padding = containerWidth < 640 ? 12 : 32;
-        const availableWidth = Math.max(260, containerWidth - padding);
-        currentScale = availableWidth / unscaledViewport.width;
-      } else if (fitMode === 'page') {
-        const paddingH = containerHeight < 640 ? 16 : 32;
-        const paddingW = containerWidth < 640 ? 12 : 32;
-        const availableHeight = Math.max(300, containerHeight - paddingH);
-        const scaleH = availableHeight / unscaledViewport.height;
-        const availableWidth = Math.max(260, containerWidth - paddingW);
-        const scaleW = availableWidth / unscaledViewport.width;
-        currentScale = Math.min(scaleH, scaleW);
+      if (fitMode === 'page' || fitMode === 'fit') {
+        // Fit perfectly on display: both width and height guaranteed visible without scrolling
+        currentScale = Math.min(scaleW, scaleH);
+      } else if (fitMode === 'width') {
+        currentScale = scaleW;
+      } else if (fitMode === 'height') {
+        currentScale = scaleH;
       }
 
-      const pixelRatio = window.devicePixelRatio || 1;
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2.5);
       const viewport = page.getViewport({ scale: currentScale });
 
       const canvas = canvasRef.current;
@@ -329,7 +377,21 @@ export function Reader() {
     renderPage();
   }, [renderPage]);
 
-  // Window resize handler
+  // Trigger swipe reminder when book is opened
+  useEffect(() => {
+    if (!loading && pdfDoc && totalPages > 1) {
+      setShowSwipeReminder(true);
+      if (reminderTimeoutRef.current) clearTimeout(reminderTimeoutRef.current);
+      reminderTimeoutRef.current = setTimeout(() => {
+        setShowSwipeReminder(false);
+      }, 5500);
+      return () => {
+        if (reminderTimeoutRef.current) clearTimeout(reminderTimeoutRef.current);
+      };
+    }
+  }, [loading, pdfDoc, totalPages]);
+
+  // Window resize & orientation change handler
   useEffect(() => {
     const handleResize = () => {
       if (fitMode !== 'custom') {
@@ -337,8 +399,24 @@ export function Reader() {
       }
     };
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
   }, [fitMode, renderPage]);
+
+  // ResizeObserver to ensure container settling always fits book perfectly
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver(() => {
+      if (fitMode !== 'custom' && pdfDoc) {
+        renderPage();
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, [fitMode, pdfDoc, renderPage]);
 
   // 4. Text Highlighting & Double Tap / Double Click handlers
   const createHighlight = useCallback(
@@ -401,6 +479,7 @@ export function Reader() {
   };
 
   const handleTouchStart = (e) => {
+    if (e.target.closest('button, aside, [role="dialog"], input')) return;
     const touch = e.touches?.[0];
     if (touch) {
       touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
@@ -408,6 +487,7 @@ export function Reader() {
   };
 
   const handleTouchEnd = (e) => {
+    if (e.target.closest('button, aside, [role="dialog"], input')) return;
     const touch = e.changedTouches?.[0];
     if (!touch) return;
 
@@ -417,8 +497,9 @@ export function Reader() {
     const deltaY = touch.clientY - startY;
     const deltaTime = Date.now() - touchStartRef.current.time;
 
-    // Check if horizontal swipe gesture (at least 45px, mainly horizontal, fast swipe)
-    if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4 && deltaTime < 450) {
+    // Check if horizontal swipe gesture (at least 35px, mainly horizontal, within 500ms)
+    if (Math.abs(deltaX) > 35 && Math.abs(deltaX) > Math.abs(deltaY) * 1.1 && deltaTime < 500) {
+      setShowSwipeReminder(false);
       if (deltaX < 0) {
         // Swipe left -> Next Page
         setCurrentPage((p) => Math.min(totalPages, p + 1));
@@ -449,9 +530,11 @@ export function Reader() {
 
       if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
         e.preventDefault();
+        setShowSwipeReminder(false);
         setCurrentPage((p) => Math.min(totalPages, p + 1));
       } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
         e.preventDefault();
+        setShowSwipeReminder(false);
         setCurrentPage((p) => Math.max(1, p - 1));
       } else if (e.key === 'Escape') {
         if (showHighlightsDrawer) {
@@ -459,7 +542,7 @@ export function Reader() {
         } else if (isFullscreen) {
           document.exitFullscreen?.();
         } else {
-          navigate('/app/library');
+          handleExitBook();
         }
       } else if (e.key === '+' || e.key === '=') {
         setScale((s) => Math.min(3.0, s + 0.15));
@@ -472,7 +555,7 @@ export function Reader() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [totalPages, showHighlightsDrawer, isFullscreen, navigate]);
+  }, [totalPages, showHighlightsDrawer, isFullscreen, handleExitBook]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -563,20 +646,22 @@ export function Reader() {
         </div>
       )}
 
-      {/* Fullscreen Reader Header with Close Arrow */}
+      {/* Fullscreen Reader Header with Close / Exit Button */}
       <header
         style={{ backgroundColor: themeConfig.navBg, borderColor: themeConfig.border }}
         className="relative z-40 flex h-13 sm:h-14 shrink-0 items-center justify-between border-b px-2.5 sm:px-5 backdrop-blur gap-2"
       >
-        {/* Left: Close Arrow + Book Info */}
+        {/* Left: Exit Button + Book Info */}
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button
-            onClick={() => navigate('/app/library')}
-            className="group flex h-9 sm:h-10 items-center gap-1 rounded-xl bg-white/10 px-2.5 sm:px-3 text-xs sm:text-sm font-bold transition hover:bg-[#009689] hover:text-white shrink-0 active:scale-95"
-            title="Close book and return to library (Escape)"
+            type="button"
+            onClick={handleExitBook}
+            className="group flex h-9 sm:h-10 items-center gap-1.5 rounded-xl bg-white/10 px-3 sm:px-3.5 text-xs sm:text-sm font-bold text-white transition hover:bg-[#009689] shrink-0 active:scale-95 cursor-pointer touch-manipulation border border-white/15"
+            title="Exit book and return to library (Escape)"
+            aria-label="Exit book"
           >
-            <ArrowLeft size={16} className="transition-transform group-hover:-translate-x-0.5 sm:size-[18px]" />
-            <span className="hidden sm:inline">Close</span>
+            <ArrowLeft size={18} className="transition-transform group-hover:-translate-x-0.5" />
+            <span>Exit</span>
           </button>
 
           <div className="min-w-0 max-w-[110px] xs:max-w-[150px] sm:max-w-xs md:max-w-md">
@@ -592,9 +677,13 @@ export function Reader() {
         {/* Center: Page Controls */}
         <div className="flex items-center gap-0.5 sm:gap-1">
           <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            type="button"
+            onClick={() => {
+              setShowSwipeReminder(false);
+              setCurrentPage((p) => Math.max(1, p - 1));
+            }}
             disabled={currentPage <= 1}
-            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg opacity-80 transition hover:bg-white/10 hover:opacity-100 disabled:opacity-20 active:scale-90"
+            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg opacity-80 transition hover:bg-white/10 hover:opacity-100 disabled:opacity-20 active:scale-90 cursor-pointer touch-manipulation"
             title="Previous page"
           >
             <ChevronLeft size={17} />
@@ -609,6 +698,7 @@ export function Reader() {
               onChange={(e) => {
                 const val = Number(e.target.value);
                 if (val >= 1 && val <= totalPages) {
+                  setShowSwipeReminder(false);
                   setCurrentPage(val);
                 }
               }}
@@ -619,16 +709,20 @@ export function Reader() {
           </div>
 
           <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            type="button"
+            onClick={() => {
+              setShowSwipeReminder(false);
+              setCurrentPage((p) => Math.min(totalPages, p + 1));
+            }}
             disabled={currentPage >= totalPages}
-            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg opacity-80 transition hover:bg-white/10 hover:opacity-100 disabled:opacity-20 active:scale-90"
+            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-lg opacity-80 transition hover:bg-white/10 hover:opacity-100 disabled:opacity-20 active:scale-90 cursor-pointer touch-manipulation"
             title="Next page"
           >
             <ChevronRight size={17} />
           </button>
         </div>
 
-        {/* Right: Theme, Highlights, Fullscreen */}
+        {/* Right: Theme, Fit Mode, Highlights, Fullscreen, Exit */}
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {/* Daily Reading Goal Status Pill */}
           {dailyStatus && (
@@ -649,8 +743,9 @@ export function Reader() {
           {/* Reader Theme Switcher */}
           <div className="flex items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 p-0.5 sm:p-1">
             <button
+              type="button"
               onClick={() => setReaderTheme('dark')}
-              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition ${
+              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition cursor-pointer touch-manipulation ${
                 readerTheme === 'dark' ? 'bg-[#009689] text-white' : 'opacity-60 hover:opacity-100'
               }`}
               title="Dark theme"
@@ -658,8 +753,9 @@ export function Reader() {
               <Moon size={13} />
             </button>
             <button
+              type="button"
               onClick={() => setReaderTheme('sepia')}
-              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition ${
+              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition cursor-pointer touch-manipulation ${
                 readerTheme === 'sepia' ? 'bg-[#d6a84a] text-[#0b1619]' : 'opacity-60 hover:opacity-100'
               }`}
               title="Sepia theme"
@@ -667,8 +763,9 @@ export function Reader() {
               <Coffee size={13} />
             </button>
             <button
+              type="button"
               onClick={() => setReaderTheme('light')}
-              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition ${
+              className={`flex h-7 w-7 sm:h-8 sm:w-8 items-center justify-center rounded-lg transition cursor-pointer touch-manipulation ${
                 readerTheme === 'light' ? 'bg-white text-[#0b1619]' : 'opacity-60 hover:opacity-100'
               }`}
               title="Light theme"
@@ -677,10 +774,26 @@ export function Reader() {
             </button>
           </div>
 
+          {/* Fit Mode Toggle */}
+          <button
+            type="button"
+            onClick={() => setFitMode((m) => (m === 'page' ? 'width' : 'page'))}
+            className={`hidden sm:flex h-8 sm:h-9 items-center gap-1 rounded-xl px-2.5 sm:px-3 text-xs font-bold transition cursor-pointer touch-manipulation ${
+              fitMode === 'page'
+                ? 'bg-[#009689] text-white shadow-sm'
+                : 'bg-white/5 opacity-80 hover:bg-white/10 hover:opacity-100'
+            }`}
+            title={fitMode === 'page' ? 'Currently fitted to display. Click to fit width.' : 'Currently fitted to width. Click to fit screen.'}
+          >
+            <Maximize2 size={14} />
+            <span className="hidden md:inline">{fitMode === 'page' ? 'Fit Screen' : 'Fit Width'}</span>
+          </button>
+
           {/* Highlights toggle */}
           <button
+            type="button"
             onClick={() => setShowHighlightsDrawer((v) => !v)}
-            className={`relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl transition ${
+            className={`relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl transition cursor-pointer touch-manipulation ${
               showHighlightsDrawer ? 'bg-[#d6a84a] text-[#0b1619]' : 'bg-white/5 opacity-80 hover:bg-white/10'
             }`}
             title="Toggle Highlights Drawer"
@@ -695,11 +808,23 @@ export function Reader() {
 
           {/* Fullscreen toggle */}
           <button
+            type="button"
             onClick={toggleFullscreen}
-            className="hidden sm:flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-white/5 opacity-80 transition hover:bg-white/10 hover:opacity-100"
+            className="hidden sm:flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-white/5 opacity-80 transition hover:bg-white/10 hover:opacity-100 cursor-pointer touch-manipulation"
             title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
           >
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
+
+          {/* Quick Exit X Button */}
+          <button
+            type="button"
+            onClick={handleExitBook}
+            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-white/10 opacity-85 transition hover:bg-red-600/80 hover:opacity-100 hover:text-white cursor-pointer touch-manipulation"
+            title="Exit book"
+            aria-label="Exit book"
+          >
+            <X size={17} />
           </button>
         </div>
       </header>
@@ -708,7 +833,11 @@ export function Reader() {
       <div className="relative flex flex-1 overflow-hidden">
         <main
           ref={containerRef}
-          className="relative flex flex-1 items-start justify-center overflow-auto p-2 sm:p-4"
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          className={`relative flex flex-1 items-center justify-center p-1.5 sm:p-3 select-none ${
+            fitMode === 'custom' ? 'overflow-auto' : 'overflow-hidden'
+          }`}
         >
           {loading ? (
             <div className="my-auto flex flex-col items-center justify-center py-20 text-center">
@@ -732,14 +861,16 @@ export function Reader() {
 
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <button
-                  onClick={() => navigate('/app/library')}
-                  className="rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white hover:bg-white/20"
+                  type="button"
+                  onClick={handleExitBook}
+                  className="rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white hover:bg-white/20 cursor-pointer"
                 >
                   Back to library
                 </button>
                 <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2 text-xs font-bold text-white hover:bg-[#007268]"
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2 text-xs font-bold text-white hover:bg-[#007268] cursor-pointer"
                 >
                   <RotateCcw size={14} /> Re-attach PDF file
                 </button>
@@ -747,23 +878,21 @@ export function Reader() {
             </div>
           ) : (
             <div
-              className="group/page relative my-auto rounded-md bg-white transition-all"
+              className="group/page relative mx-auto my-auto flex items-center justify-center rounded-lg bg-white transition-all shadow-2xl overflow-hidden"
               style={{
                 boxShadow: themeConfig.pageShadow,
                 filter: themeConfig.pageFilter,
               }}
               onMouseUp={handleMouseUp}
               onDoubleClick={handleDoubleClick}
-              onTouchStart={handleTouchStart}
-              onTouchEnd={handleTouchEnd}
             >
               {/* Canvas Rendering of the PDF page */}
-              <canvas ref={canvasRef} className="block rounded-md" />
+              <canvas ref={canvasRef} className="block rounded-lg" />
 
               {/* Text Layer for Selection & Highlights */}
               <div
                 ref={textLayerRef}
-                className="textLayer absolute inset-0 select-text overflow-hidden rounded-md"
+                className="textLayer absolute inset-0 select-text overflow-hidden rounded-lg"
                 style={{ zIndex: 2 }}
               />
 
@@ -782,8 +911,12 @@ export function Reader() {
           {/* Quick Floating Next/Prev Side Buttons (Desktop only - mobile uses swipe gestures) */}
           {currentPage > 1 && !loading && (
             <button
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              className="hidden md:flex fixed left-4 top-1/2 z-30 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/60 p-3 text-white shadow-2xl backdrop-blur transition hover:scale-110 hover:bg-[#009689]"
+              type="button"
+              onClick={() => {
+                setShowSwipeReminder(false);
+                setCurrentPage((p) => Math.max(1, p - 1));
+              }}
+              className="hidden md:flex fixed left-4 top-1/2 z-30 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/60 p-3 text-white shadow-2xl backdrop-blur transition hover:scale-110 hover:bg-[#009689] cursor-pointer"
               title="Previous page (Left Arrow)"
             >
               <ChevronLeft size={22} />
@@ -792,8 +925,12 @@ export function Reader() {
 
           {currentPage < totalPages && !loading && (
             <button
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-              className="hidden md:flex fixed right-4 top-1/2 z-30 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/60 p-3 text-white shadow-2xl backdrop-blur transition hover:scale-110 hover:bg-[#009689]"
+              type="button"
+              onClick={() => {
+                setShowSwipeReminder(false);
+                setCurrentPage((p) => Math.min(totalPages, p + 1));
+              }}
+              className="hidden md:flex fixed right-4 top-1/2 z-30 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/60 p-3 text-white shadow-2xl backdrop-blur transition hover:scale-110 hover:bg-[#009689] cursor-pointer"
               title="Next page (Right Arrow / Space)"
             >
               <ChevronRight size={22} />
@@ -907,6 +1044,45 @@ export function Reader() {
         )}
       </div>
 
+      {/* Reminder when book is opened: swipe left or right to open next page */}
+      {showSwipeReminder && !loading && (
+        <aside
+          role="status"
+          aria-live="polite"
+          className="pointer-events-auto fixed bottom-14 left-1/2 z-40 -translate-x-1/2 transform transition-all duration-300 animate-in fade-in slide-in-from-bottom-3"
+        >
+          <div className="flex items-center gap-2 sm:gap-2.5 rounded-full border border-emerald-500/40 bg-[#081316]/95 px-3.5 sm:px-5 py-2 sm:py-2.5 text-white shadow-2xl backdrop-blur-md">
+            <span className="flex items-center gap-1 text-[#5fc4b8] animate-pulse">
+              <ChevronLeft size={16} />
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider hidden xs:inline">Prev</span>
+            </span>
+
+            <span className="h-3.5 w-[1px] bg-white/20" />
+
+            <span className="whitespace-nowrap text-xs sm:text-sm font-semibold">
+              Swipe <span className="rounded bg-[#009689]/40 px-1.5 py-0.5 font-bold text-[#5fc4b8]">left</span> or <span className="rounded bg-[#009689]/40 px-1.5 py-0.5 font-bold text-[#5fc4b8]">right</span> to open next page
+            </span>
+
+            <span className="h-3.5 w-[1px] bg-white/20" />
+
+            <span className="flex items-center gap-1 text-[#5fc4b8] animate-pulse">
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider hidden xs:inline">Next</span>
+              <ChevronRight size={16} />
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setShowSwipeReminder(false)}
+              className="ml-1 rounded-full p-1 text-white/60 transition hover:bg-white/20 hover:text-white cursor-pointer"
+              title="Dismiss reminder"
+              aria-label="Dismiss reminder"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </aside>
+      )}
+
       {/* Fullscreen Reader Bottom Status & Scrub Bar */}
       <footer
         style={{
@@ -928,14 +1104,21 @@ export function Reader() {
             min={1}
             max={totalPages || 1}
             value={currentPage}
-            onChange={(e) => setCurrentPage(Number(e.target.value))}
+            onChange={(e) => {
+              setShowSwipeReminder(false);
+              setCurrentPage(Number(e.target.value));
+            }}
             aria-label="Seek page"
             className="h-2 w-full cursor-pointer appearance-none rounded-full bg-white/20 accent-[#009689] touch-manipulation"
           />
         </div>
 
-        <div className="hidden items-center gap-3 sm:flex opacity-70 text-[11px]">
-          <span>Swipe or tap arrows to turn pages</span>
+        <div className="flex items-center gap-2 text-[11px] opacity-75">
+          <span className="flex items-center gap-1">
+            <ChevronLeft size={13} className="text-[#5fc4b8]" />
+            Swipe left / right to turn pages
+            <ChevronRight size={13} className="text-[#5fc4b8]" />
+          </span>
         </div>
       </footer>
 
