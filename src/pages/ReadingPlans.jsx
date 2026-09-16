@@ -14,7 +14,11 @@ import {
   ArrowRight,
   TrendingUp,
   X,
-  Play
+  Play,
+  User,
+  Users,
+  AtSign,
+  UserPlus
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import {
@@ -26,6 +30,7 @@ import {
   getUserPlans,
   fetchBooks,
   fetchPlans,
+  searchRegisteredUsers,
 } from '../lib/appStore';
 
 const PRESET_DAYS = [
@@ -44,6 +49,12 @@ export function ReadingPlans() {
   const [selectedBookId, setSelectedBookId] = useState('');
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [days, setDays] = useState(14);
+  const [planType, setPlanType] = useState('individual'); // 'individual' | 'group'
+  const [groupName, setGroupName] = useState('');
+  const [memberInput, setMemberInput] = useState('');
+  const [members, setMembers] = useState([]);
+  const [userSuggestions, setUserSuggestions] = useState([]);
+  const [filterPlanTab, setFilterPlanTab] = useState('all'); // 'all' | 'individual' | 'group'
 
   useEffect(() => {
     if (user?.id) {
@@ -112,11 +123,80 @@ export function ReadingPlans() {
     };
   }, [pagesPerDay]);
 
+  const handleSearchUsers = async (val) => {
+    setMemberInput(val);
+    if (!val || val.trim().length < 1) {
+      setUserSuggestions([]);
+      return;
+    }
+    try {
+      const cleanVal = val.replace(/^@/, '').trim();
+      const results = await searchRegisteredUsers(cleanVal);
+      const currentUserName = (user?.name || '').toLowerCase().replace(/\s+/g, '');
+      const existingUsernames = new Set(members.map((m) => m.username.toLowerCase()));
+      // Filter out self and already added members
+      const filtered = (results || []).filter((u) => {
+        const uName = (u.username || u.name || '').toLowerCase();
+        return uName !== currentUserName && !existingUsernames.has(uName);
+      });
+      setUserSuggestions(filtered);
+    } catch {
+      setUserSuggestions([]);
+    }
+  };
+
+  const handleAddMember = (candidate) => {
+    let username = '';
+    let name = '';
+    let email = '';
+    let id = null;
+
+    if (typeof candidate === 'object' && candidate !== null) {
+      username = candidate.username || candidate.name?.toLowerCase().replace(/\s+/g, '') || '';
+      name = candidate.name || username;
+      email = candidate.email || '';
+      id = candidate.id || null;
+    } else {
+      username = String(candidate || '').replace(/^@/, '').trim().toLowerCase();
+      name = username;
+    }
+
+    if (!username) return;
+
+    // Check if member already exists
+    if (members.some((m) => m.username.toLowerCase() === username.toLowerCase())) {
+      setMemberInput('');
+      setUserSuggestions([]);
+      return;
+    }
+
+    // Check if adding self
+    const currentUserName = (user?.name || '').toLowerCase().replace(/\s+/g, '');
+    if (username.toLowerCase() === currentUserName) {
+      setMemberInput('');
+      setUserSuggestions([]);
+      return;
+    }
+
+    setMembers([...members, { id, username, name, email, addedAt: new Date().toISOString() }]);
+    setMemberInput('');
+    setUserSuggestions([]);
+  };
+
+  const handleRemoveMember = (usernameToRemove) => {
+    setMembers(members.filter((m) => m.username !== usernameToRemove));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBook?.id || !user?.id) return;
 
     try {
+      const isGroup = planType === 'group';
+      const cleanGroupName = isGroup
+        ? (groupName.trim() || `${user?.name || 'Reader'}'s Book Club`)
+        : '';
+
       const newPlan = await addPlan({
         bookId: selectedBook.id,
         userId: user.id,
@@ -125,10 +205,19 @@ export function ReadingPlans() {
         days: numDays,
         pagesPerDay,
         totalPages,
+        planType: isGroup ? 'group' : 'individual',
+        groupName: cleanGroupName,
+        members: isGroup ? members : [],
       });
 
       setPlans([newPlan, ...plans]);
       setOpen(false);
+      // Reset form state
+      setPlanType('individual');
+      setGroupName('');
+      setMembers([]);
+      setMemberInput('');
+      setUserSuggestions([]);
     } catch (err) {
       console.error('Error adding plan:', err);
     }
@@ -189,6 +278,152 @@ export function ReadingPlans() {
             </div>
 
             <form onSubmit={handleSubmit} className="mt-5 space-y-5 sm:mt-7 sm:space-y-6">
+              {/* Plan Type Selector */}
+              <div>
+                <label className="mb-2 block text-xs sm:text-sm font-semibold">Choose Plan Type</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPlanType('individual')}
+                    className={`flex items-center justify-center gap-2 rounded-2xl border p-3 text-xs sm:text-sm font-bold transition cursor-pointer ${
+                      planType === 'individual'
+                        ? 'border-[#009689] bg-[#e6f4f2] text-[#007268] ring-2 ring-[#009689]/20 dark:bg-[#009689]/20 dark:text-[#5fc4b8]'
+                        : 'border-[#dfe5dc] bg-[#fbfcf9] text-[#556864] hover:border-[#009689]/50 dark:border-white/10 dark:bg-white/5 dark:text-white/70'
+                    }`}
+                  >
+                    <User size={18} />
+                    <span>Individual Plan</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPlanType('group')}
+                    className={`flex items-center justify-center gap-2 rounded-2xl border p-3 text-xs sm:text-sm font-bold transition cursor-pointer ${
+                      planType === 'group'
+                        ? 'border-purple-500 bg-purple-50 text-purple-700 ring-2 ring-purple-500/20 dark:border-purple-400 dark:bg-purple-950/40 dark:text-purple-300'
+                        : 'border-[#dfe5dc] bg-[#fbfcf9] text-[#556864] hover:border-purple-400/50 dark:border-white/10 dark:bg-white/5 dark:text-white/70'
+                    }`}
+                  >
+                    <Users size={18} />
+                    <span>Group Reading Plan</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Group Reading Plan Configuration */}
+              {planType === 'group' && (
+                <div className="rounded-2xl border border-purple-200 bg-purple-50/50 p-4 sm:p-5 dark:border-purple-900/40 dark:bg-purple-950/20 space-y-4">
+                  <div>
+                    <label className="mb-1.5 block text-xs sm:text-sm font-semibold text-[#0b1619] dark:text-white">
+                      Group / Book Club Name
+                    </label>
+                    <input
+                      type="text"
+                      value={groupName}
+                      onChange={(e) => setGroupName(e.target.value)}
+                      placeholder="e.g. Summer Reading Club, Philosophy Circle..."
+                      className="w-full rounded-xl border border-[#d5ddd1] bg-white px-3.5 py-2.5 text-xs sm:text-sm outline-none focus:border-purple-500 dark:border-white/10 dark:bg-white/5"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs sm:text-sm font-semibold text-[#0b1619] dark:text-white">
+                        Add Group Members (by Username)
+                      </label>
+                      <span className="text-[11px] text-[#7b8c84] dark:text-white/60">
+                        {members.length + 1} participant{members.length > 0 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    <div className="relative">
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <AtSign className="absolute left-3 top-3 text-[#8b9a93]" size={16} />
+                          <input
+                            type="text"
+                            value={memberInput}
+                            onChange={(e) => handleSearchUsers(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleAddMember(memberInput);
+                              }
+                            }}
+                            placeholder="Type username or name..."
+                            className="w-full rounded-xl border border-[#d5ddd1] bg-white py-2.5 pl-9 pr-3 text-xs sm:text-sm outline-none focus:border-purple-500 dark:border-white/10 dark:bg-white/5"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleAddMember(memberInput)}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-purple-700 transition active:scale-95 cursor-pointer"
+                        >
+                          <UserPlus size={15} /> Add
+                        </button>
+                      </div>
+
+                      {/* Dropdown suggestions */}
+                      {userSuggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-48 overflow-y-auto rounded-xl border border-[#e4e1d6] bg-white p-1 shadow-lg dark:border-white/10 dark:bg-[#1a2c30]">
+                          {userSuggestions.map((u) => (
+                            <button
+                              type="button"
+                              key={u.id || u.username}
+                              onClick={() => handleAddMember(u)}
+                              className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs hover:bg-purple-50 dark:hover:bg-white/10 transition cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="grid h-6 w-6 place-items-center rounded-full bg-purple-100 text-[10px] font-bold text-purple-700 dark:bg-purple-900/50 dark:text-purple-300">
+                                  {u.name?.charAt(0) || u.username?.charAt(0) || 'U'}
+                                </span>
+                                <div>
+                                  <p className="font-bold text-[#0b1619] dark:text-white">@{u.username || u.name}</p>
+                                  <p className="text-[10px] text-[#7b8c84] dark:text-white/60">{u.name}</p>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-semibold text-purple-600 dark:text-purple-400">+ Add</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Members Chips List */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      {/* Host Chip */}
+                      <span className="inline-flex items-center gap-1.5 rounded-xl bg-purple-100/90 px-2.5 py-1 text-xs font-bold text-purple-800 dark:bg-purple-900/40 dark:text-purple-200">
+                        <span>@{user?.name?.toLowerCase().replace(/\s+/g, '') || 'you'}</span>
+                        <span className="text-[9px] uppercase font-extrabold tracking-wider bg-purple-600 text-white rounded px-1 py-0.2">Host</span>
+                      </span>
+
+                      {/* Added members chips */}
+                      {members.map((m) => (
+                        <span
+                          key={m.username}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-purple-200 bg-white px-2.5 py-1 text-xs font-semibold text-[#0b1619] shadow-2xs dark:border-purple-800/40 dark:bg-white/10 dark:text-white"
+                        >
+                          <span>@{m.username}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMember(m.username)}
+                            className="rounded-full p-0.5 text-stone-400 hover:text-red-500 transition cursor-pointer"
+                            aria-label={`Remove ${m.username}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      ))}
+
+                      {members.length === 0 && (
+                        <span className="text-xs text-stone-400 dark:text-white/40 italic">
+                          No members added yet. Type a username above to invite friends.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 1. Book Selector */}
               <div>
                 <label className="mb-2 block text-xs sm:text-sm font-semibold">1. Select a Book</label>
@@ -403,10 +638,42 @@ export function ReadingPlans() {
           </div>
         ) : (
           <div className="mt-6 sm:mt-8 space-y-4 sm:space-y-5">
-            <h2 className="text-lg font-bold sm:text-xl">Active Plans ({plans.length})</h2>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-lg font-bold sm:text-xl">Active Plans ({plans.length})</h2>
+
+              {/* Plan Filter Tabs */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                {[
+                  { id: 'all', label: 'All Plans', count: plans.length },
+                  { id: 'individual', label: 'Personal', count: plans.filter(p => p.planType !== 'group').length },
+                  { id: 'group', label: 'Group Plans', count: plans.filter(p => p.planType === 'group').length },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setFilterPlanTab(tab.id)}
+                    className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all cursor-pointer ${
+                      filterPlanTab === tab.id
+                        ? 'bg-[#009689] text-white shadow-xs'
+                        : 'border border-[#dfe5dc] bg-white text-[#556864] hover:bg-[#f6f4ee] dark:border-white/10 dark:bg-[#142326] dark:text-white/70'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span className="rounded-full bg-black/10 dark:bg-white/15 px-1.5 py-0.2 text-[10px]">
+                      {tab.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div className="grid gap-4 sm:gap-5 md:grid-cols-2">
-              {plans.map((plan) => {
+              {plans
+                .filter((plan) => {
+                  if (filterPlanTab === 'individual') return plan.planType !== 'group';
+                  if (filterPlanTab === 'group') return plan.planType === 'group';
+                  return true;
+                })
+                .map((plan) => {
                 const book = books.find((b) => b.id === plan.bookId);
                 const cover = book?.coverDataUrl || book?.coverUrl;
                 const currentPage = book ? getProgress(user.id, book.id).page : 1;
@@ -414,11 +681,17 @@ export function ReadingPlans() {
                 const pct = Math.min(100, Math.round((currentPage / total) * 100));
                 const remainingPages = Math.max(0, total - currentPage);
                 const daysLeft = Math.ceil(remainingPages / (plan.pagesPerDay || 1));
+                const isGroup = plan.planType === 'group';
+                const planMembers = Array.isArray(plan.members) ? plan.members : [];
 
                 return (
                   <div
                     key={plan.id}
-                    className="group relative flex flex-col justify-between overflow-hidden rounded-3xl border border-[#e4e1d6] bg-white p-4 shadow-sm transition duration-200 hover:border-[#009689]/40 hover:shadow-md dark:border-white/10 dark:bg-[#142326] sm:p-6"
+                    className={`group relative flex flex-col justify-between overflow-hidden rounded-3xl border bg-white p-4 shadow-sm transition duration-200 hover:shadow-md dark:bg-[#142326] sm:p-6 ${
+                      isGroup
+                        ? 'border-purple-200 dark:border-purple-900/40 hover:border-purple-400'
+                        : 'border-[#e4e1d6] hover:border-[#009689]/40 dark:border-white/10'
+                    }`}
                   >
                     <div>
                       {/* Top Header: Cover, Title, Target */}
@@ -442,7 +715,7 @@ export function ReadingPlans() {
                             </h3>
                             <button
                               onClick={() => handleRemove(plan.id)}
-                              className="grid h-9 w-9 place-items-center rounded-lg text-[#9b5147] opacity-70 transition hover:bg-[#fff1ef] hover:opacity-100 dark:hover:bg-red-950/40 touch-manipulation"
+                              className="grid h-9 w-9 place-items-center rounded-lg text-[#9b5147] opacity-70 transition hover:bg-[#fff1ef] hover:opacity-100 dark:hover:bg-red-950/40 touch-manipulation cursor-pointer"
                               title="Delete plan"
                             >
                               <Trash2 size={16} />
@@ -452,6 +725,16 @@ export function ReadingPlans() {
                           <p className="truncate text-xs text-[#7b8c84] dark:text-white/60">
                             {book?.author || 'Unknown author'}
                           </p>
+
+                          {/* Group Badge if Group Plan */}
+                          {isGroup && (
+                            <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg bg-purple-100/80 dark:bg-purple-950/40 px-2 py-0.5 text-[11px] font-bold text-purple-800 dark:text-purple-300">
+                              <Users size={12} />
+                              <span className="truncate max-w-[170px]">
+                                {plan.groupName || 'Group Plan'}
+                              </span>
+                            </div>
+                          )}
 
                           <div className="mt-2.5 sm:mt-3 flex flex-wrap items-center gap-1.5 sm:gap-2">
                             <span className="inline-flex items-center gap-1 rounded-lg bg-[#e6f4f2] px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
@@ -463,6 +746,36 @@ export function ReadingPlans() {
                           </div>
                         </div>
                       </div>
+
+                      {/* Group Members List if Group Plan */}
+                      {isGroup && (
+                        <div className="mt-3.5 rounded-2xl bg-purple-50/50 p-2.5 dark:bg-purple-950/20 border border-purple-100 dark:border-purple-900/30">
+                          <div className="flex items-center justify-between text-[11px] font-semibold text-purple-900 dark:text-purple-300 mb-1.5">
+                            <span className="flex items-center gap-1">
+                              <Users size={12} /> Members ({planMembers.length + 1})
+                            </span>
+                            <span className="text-[10px] text-purple-600 dark:text-purple-400">
+                              {plan.userId === user?.id ? 'You are Host' : 'Joined Group'}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            <span className="rounded-md bg-purple-200/60 dark:bg-purple-900/50 px-2 py-0.5 text-[10px] font-bold text-purple-900 dark:text-purple-200">
+                              Host
+                            </span>
+                            {planMembers.map((m, idx) => {
+                              const uName = typeof m === 'string' ? m : (m.username || m.name || 'Member');
+                              return (
+                                <span
+                                  key={idx}
+                                  className="rounded-md bg-white px-2 py-0.5 text-[10px] font-medium text-stone-700 shadow-2xs border border-purple-100 dark:bg-white/10 dark:border-transparent dark:text-white/80"
+                                >
+                                  @{uName}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Progress Bar */}
                       <div className="mt-4 sm:mt-5">

@@ -352,7 +352,30 @@ export async function saveProgress(userId, bookId, page) {
 
 // Reading Plans
 export const getPlans = () => read(PLANS_KEY, []);
-export const getUserPlans = (userId) => getPlans().filter((p) => p.userId === userId);
+
+export const getUserPlans = (userId) => {
+  const user = getCurrentUser();
+  const userName = (user?.name || '').toLowerCase();
+  const userClean = userName.replace(/\s+/g, '');
+  const userEmail = (user?.email || '').toLowerCase();
+
+  return getPlans().filter((p) => {
+    if (p.userId === userId) return true;
+    if (p.planType === 'group' && Array.isArray(p.members)) {
+      return p.members.some((m) => {
+        const memStr = (typeof m === 'string' ? m : (m.username || m.name || m.email || '')).toLowerCase();
+        const memClean = memStr.replace(/[@\s]/g, '');
+        return (
+          memStr === userName ||
+          memClean === userClean ||
+          memStr === userEmail ||
+          (m.id && m.id === userId)
+        );
+      });
+    }
+    return false;
+  });
+};
 
 export async function fetchPlans() {
   try {
@@ -362,6 +385,30 @@ export async function fetchPlans() {
   } catch (err) {
     console.warn('Could not fetch plans from backend:', err.message);
     return getPlans();
+  }
+}
+
+export async function searchRegisteredUsers(query = '') {
+  try {
+    return await api.plans.searchUsers(query);
+  } catch {
+    const localUsers = getUsers();
+    const q = query.trim().toLowerCase();
+    return localUsers
+      .filter((u) => {
+        if (!q) return true;
+        const n = (u.name || '').toLowerCase();
+        const e = (u.email || '').toLowerCase();
+        return n.includes(q) || e.includes(q);
+      })
+      .map((u) => ({
+        id: u.id,
+        name: u.name,
+        username: (u.name || '').toLowerCase().replace(/\s+/g, '') || u.email?.split('@')[0],
+        email: u.email,
+        avatar: u.avatar || null,
+      }))
+      .slice(0, 10);
   }
 }
 
@@ -392,6 +439,91 @@ export async function deletePlan(id) {
     PLANS_KEY,
     getPlans().filter((p) => p.id !== id)
   );
+}
+
+// Daily Reading Quota Tracking
+const DAILY_READING_KEY = 'reedshelf_daily_reading';
+
+export function getDailyQuotaForBook(userId, bookId) {
+  if (!userId) return 10;
+  const plans = getUserPlans(userId);
+  const bookPlan = plans.find((p) => p.bookId === bookId);
+  if (bookPlan?.pagesPerDay) return Number(bookPlan.pagesPerDay);
+  if (plans[0]?.pagesPerDay) return Number(plans[0].pagesPerDay);
+  return 10;
+}
+
+export function getDailyReadingStatus(userId, bookId) {
+  if (!userId || !bookId) {
+    return { quota: 10, pagesReadToday: 0, celebrated: false, isMet: false };
+  }
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const store = read(DAILY_READING_KEY, {});
+  const entryKey = `${userId}:${bookId}:${todayKey}`;
+  const record = store[entryKey];
+  const quota = getDailyQuotaForBook(userId, bookId);
+
+  const pagesReadToday = record?.pagesReadToday || 0;
+  const celebrated = Boolean(record?.celebrated);
+
+  return {
+    quota,
+    pagesReadToday,
+    celebrated,
+    isMet: pagesReadToday >= quota,
+  };
+}
+
+export function recordDailyReadingProgress(userId, bookId, currentPage) {
+  if (!userId || !bookId) return { shouldCelebrate: false, quota: 10, pagesReadToday: 0 };
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const store = read(DAILY_READING_KEY, {});
+  const entryKey = `${userId}:${bookId}:${todayKey}`;
+  const quota = getDailyQuotaForBook(userId, bookId);
+
+  let record = store[entryKey];
+  const pageNum = Math.max(1, Number(currentPage) || 1);
+
+  if (!record) {
+    record = {
+      startPage: pageNum,
+      maxPage: pageNum,
+      pagesReadToday: 0,
+      celebrated: false,
+      date: todayKey,
+    };
+  } else {
+    // If user read past maxPage, increment pagesReadToday
+    if (pageNum > record.maxPage) {
+      const added = pageNum - record.maxPage;
+      record.pagesReadToday = (record.pagesReadToday || 0) + added;
+      record.maxPage = pageNum;
+    } else if (pageNum - record.startPage > (record.pagesReadToday || 0)) {
+      record.pagesReadToday = Math.max(record.pagesReadToday || 0, pageNum - record.startPage);
+    }
+  }
+
+  const shouldCelebrate = record.pagesReadToday >= quota && !record.celebrated;
+  store[entryKey] = record;
+  write(DAILY_READING_KEY, store);
+
+  return {
+    shouldCelebrate,
+    quota,
+    pagesReadToday: record.pagesReadToday,
+    celebrated: record.celebrated,
+  };
+}
+
+export function markDailyQuotaCelebrated(userId, bookId) {
+  if (!userId || !bookId) return;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const store = read(DAILY_READING_KEY, {});
+  const entryKey = `${userId}:${bookId}:${todayKey}`;
+  if (store[entryKey]) {
+    store[entryKey].celebrated = true;
+    write(DAILY_READING_KEY, store);
+  }
 }
 
 // User Settings

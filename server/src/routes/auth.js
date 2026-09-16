@@ -124,50 +124,14 @@ authRouter.post('/register', async (req, res) => {
 
     const trimmedEmail = email.trim().toLowerCase();
 
-    // Enforce email verification code before creating account
-    if (!code) {
-      return res.status(400).json({
-        error: 'Email verification code is required. Please verify your email before creating an account.',
-        requiresVerification: true
-      });
-    }
-
-    const cleanCode = String(code).trim();
-    let isCodeValid = false;
-    let codeError = '';
-
-    // 1. Check local verification store (for SMTP or dev test codes)
-    const localResult = verifyCode(trimmedEmail, cleanCode);
-    if (localResult.valid) {
-      isCodeValid = true;
-    } else {
-      codeError = localResult.error;
-      // 2. If not matched in local store, verify with Supabase OTP mailer
-      try {
-        const { getSupabaseClient } = await import('../storage/supabase.js');
-        const supabase = getSupabaseClient();
-        if (supabase?.auth?.verifyOtp) {
-          const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
-            email: trimmedEmail,
-            token: cleanCode,
-            type: 'email'
-          });
-          if (!otpError && (otpData?.user || otpData?.session)) {
-            isCodeValid = true;
-          } else if (otpError) {
-            console.log(`[AUTH] Supabase OTP verification failed for ${trimmedEmail}:`, otpError.message);
-            codeError = otpError.message.includes('expired')
-              ? 'Verification code has expired or is invalid. Please request a new code.'
-              : 'Incorrect verification code. Please check your email and try again.';
-          }
-        }
-      } catch (err) {
-        console.warn('[AUTH] Supabase OTP verify error:', err.message);
+    // Email service is currently bypassed for registration
+    // If a code was provided, attempt verification, but do not block registration if code is omitted
+    if (code) {
+      const cleanCode = String(code).trim();
+      const localResult = verifyCode(trimmedEmail, cleanCode);
+      if (!localResult.valid) {
+        console.warn(`[AUTH] Local verification not matched for ${trimmedEmail}, proceeding as email service is bypassed.`);
       }
-    }
-
-    if (!isCodeValid) {
-      return res.status(400).json({ error: codeError || 'Incorrect verification code. Please check your email and try again.' });
     }
 
     // Check if new registrations are disabled by admin

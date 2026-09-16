@@ -282,6 +282,10 @@ export const api = {
         method: 'DELETE',
       });
     },
+
+    async searchUsers(query = '') {
+      return await apiRequest(`/api/plans/search-users?q=${encodeURIComponent(query)}`);
+    },
   },
 
   highlights: {

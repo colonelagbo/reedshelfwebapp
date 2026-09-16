@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS reading_plans (
   total_pages INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  plan_type TEXT DEFAULT 'individual',
+  group_name TEXT,
+  group_members TEXT,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
 );
@@ -530,8 +533,22 @@ function queryFallback(sql, params, mode) {
         const [id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at] = params;
         target.unshift({ id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at });
       } else if (lower.includes('into reading_plans')) {
-        const [id, user_id, book_id, start_date, target_date, days, pages_per_day, total_pages, created_at, updated_at] = params;
-        target.unshift({ id, user_id, book_id, start_date, target_date, days, pages_per_day, total_pages, created_at, updated_at });
+        const [id, user_id, book_id, start_date, target_date, days, pages_per_day, total_pages, created_at, updated_at, plan_type, group_name, group_members] = params;
+        target.unshift({
+          id,
+          user_id,
+          book_id,
+          start_date,
+          target_date,
+          days,
+          pages_per_day,
+          total_pages,
+          created_at,
+          updated_at,
+          plan_type: plan_type || 'individual',
+          group_name: group_name || '',
+          group_members: group_members || '[]'
+        });
       } else if (lower.includes('into highlights')) {
         const [id, user_id, book_id, page, text, color, created_at] = params;
         target.push({ id, user_id, book_id, page, text, color, created_at });

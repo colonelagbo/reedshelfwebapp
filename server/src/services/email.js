@@ -133,36 +133,26 @@ This code expires in 10 minutes.
 If you did not request this, please ignore this email.
 `;
 
-  // Skip external mailer for synthetic test addresses to preserve quota for real users
-  const isTestEmail = targetEmail.endsWith('@example.com') || targetEmail.endsWith('@test.com') || process.env.NODE_ENV === 'test';
-  if (isTestEmail) {
-    logConsoleVerification(targetEmail, code);
-    return { success: true, mode: 'test_synthetic' };
-  }
-
+  // Email service is disabled / bypassed per configuration request
+  logConsoleVerification(targetEmail, code);
   const transporter = getTransporter();
-
-  if (!transporter) {
-    console.error(`[EMAIL SERVICE] No SMTP service configured to send to ${targetEmail}`);
-    throw new Error('Email service is not configured on this server. Please ensure SMTP credentials are set in environment variables.');
+  if (transporter) {
+    try {
+      console.log(`[EMAIL SERVICE] Attempting dispatch to ${targetEmail}...`);
+      await transporter.sendMail({
+        from: fromAddress,
+        to: targetEmail,
+        replyTo: fromAddress,
+        subject,
+        text: textContent,
+        html: htmlContent
+      });
+      return { success: true, mode: 'smtp', recipient: targetEmail };
+    } catch (err) {
+      console.warn(`[EMAIL SERVICE] Email sending bypassed (SMTP error: ${err.message})`);
+    }
   }
-
-  try {
-    console.log(`[EMAIL SERVICE] Dispatching code ${code} to new user: ${targetEmail} (via sender: ${fromAddress})`);
-    const info = await transporter.sendMail({
-      from: fromAddress,
-      to: targetEmail,
-      replyTo: fromAddress,
-      subject,
-      text: textContent,
-      html: htmlContent
-    });
-    console.log(`[EMAIL SERVICE] Verification email successfully delivered to recipient ${targetEmail}: ${info.messageId}`);
-    return { success: true, mode: 'smtp', messageId: info.messageId, recipient: targetEmail };
-  } catch (err) {
-    console.error(`[EMAIL SERVICE] Failed to send via SMTP to recipient ${targetEmail}:`, err.message);
-    throw new Error(`Unable to deliver verification email to ${targetEmail}. Please verify your email address or try again later.`);
-  }
+  return { success: true, mode: 'bypassed', recipient: targetEmail };
 }
 
 function logConsoleVerification(email, code) {

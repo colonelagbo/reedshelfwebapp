@@ -2,8 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, Smartphone, Download } from 'lucide-react';
 import { AuthLayout } from '../components/AuthLayout';
-import { registerUser, sendEmailVerification } from '../lib/appStore';
-import { EmailVerificationModal } from '../components/EmailVerificationModal';
+import { registerUser } from '../lib/appStore';
 import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
 
 export function Register() {
@@ -11,7 +10,6 @@ export function Register() {
   const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [twoFactorData, setTwoFactorData] = useState(null);
   const navigate = useNavigate();
   const isStandalone = typeof window !== 'undefined' && (
@@ -45,35 +43,17 @@ export function Register() {
 
     setLoading(true);
     try {
-      // Send 6-digit authenticator verification code to the email first
-      await sendEmailVerification({
+      await registerUser({
+        name: form.name.trim(),
         email: form.email.trim(),
-        name: form.name.trim()
+        password: form.password
       });
-      setShowVerificationModal(true);
+      handleAuthSuccess();
     } catch (err) {
-      setError(err.message || 'Failed to send verification code. Please check your email.');
+      setError(err.message || 'Failed to create account. Please try again.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleVerifyAndRegister = async (code) => {
-    await registerUser({
-      name: form.name.trim(),
-      email: form.email.trim(),
-      password: form.password,
-      code
-    });
-    setShowVerificationModal(false);
-    handleAuthSuccess();
-  };
-
-  const handleResendCode = async () => {
-    return await sendEmailVerification({
-      email: form.email.trim(),
-      name: form.name.trim()
-    });
   };
 
   return (
@@ -208,14 +188,14 @@ export function Register() {
         <button
           type="submit"
           disabled={loading}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#009689] py-3.5 text-base font-bold text-white shadow-md shadow-[#009689]/20 transition-all duration-200 hover:bg-[#007f74] active:scale-[0.99] disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#009689] py-3.5 text-base font-bold text-white shadow-md shadow-[#009689]/20 transition-all duration-200 hover:bg-[#007f74] active:scale-[0.99] disabled:opacity-50 cursor-pointer"
         >
           {loading ? (
             <>
-              <Loader2 size={18} className="animate-spin" /> Sending verification code...
+              <Loader2 size={18} className="animate-spin" /> Creating your account...
             </>
           ) : (
-            'Verify email & create account'
+            'Create account'
           )}
         </button>
 
@@ -228,16 +208,6 @@ export function Register() {
           </Link>
         </div>
       </form>
-
-      {/* Email Authenticator Verification Modal before account is created */}
-      {showVerificationModal && (
-        <EmailVerificationModal
-          email={form.email.trim()}
-          onVerify={handleVerifyAndRegister}
-          onResend={handleResendCode}
-          onCancel={() => setShowVerificationModal(false)}
-        />
-      )}
 
       {/* 2FA Verification Modal if existing 2FA account logs in */}
       {twoFactorData && (

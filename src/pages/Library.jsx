@@ -11,7 +11,10 @@ import {
   Plus,
   AlertTriangle,
   Loader2,
-  X
+  X,
+  CheckCircle2,
+  Flame,
+  ArrowUpDown
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { BookCard } from '../components/BookCard';
@@ -46,6 +49,8 @@ export function Library() {
   });
   const [query, setQuery] = useState('');
   const [view, setView] = useState(() => getSettings(getCurrentUser()?.id || '').libraryView || 'grid');
+  const [filterTab, setFilterTab] = useState('all');
+  const [sortBy, setSortBy] = useState('recent');
   const [bookToDelete, setBookToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
@@ -86,13 +91,61 @@ export function Library() {
     loadBooks();
   }, [loadBooks]);
 
-  const filtered = useMemo(
-    () =>
-      books.filter((b) =>
-        `${b.title} ${b.author}`.toLowerCase().includes(query.toLowerCase())
-      ),
-    [books, query]
-  );
+  // Statistics calculation
+  const stats = useMemo(() => {
+    let reading = 0;
+    let completed = 0;
+    let unread = 0;
+
+    books.forEach((b) => {
+      const p = getProgress(user?.id, b.id).page;
+      const total = b.totalPages || 0;
+      if (total > 0 && p >= total) {
+        completed++;
+      } else if (p > 1) {
+        reading++;
+      } else {
+        unread++;
+      }
+    });
+
+    return { total: books.length, reading, completed, unread };
+  }, [books, user?.id]);
+
+  // Filtered and sorted books list
+  const filtered = useMemo(() => {
+    let result = books.filter((b) => {
+      const matchesQuery = `${b.title} ${b.author}`.toLowerCase().includes(query.toLowerCase());
+      if (!matchesQuery) return false;
+
+      const p = getProgress(user?.id, b.id).page;
+      const total = b.totalPages || 0;
+      const isCompleted = total > 0 && p >= total;
+      const isReading = p > 1 && !isCompleted;
+      const isUnread = p <= 1;
+
+      if (filterTab === 'reading') return isReading;
+      if (filterTab === 'completed') return isCompleted;
+      if (filterTab === 'unread') return isUnread;
+      return true;
+    });
+
+    // Sorting
+    result = [...result].sort((a, b) => {
+      if (sortBy === 'title') {
+        return (a.title || '').localeCompare(b.title || '');
+      }
+      if (sortBy === 'progress') {
+        const pA = a.totalPages ? (getProgress(user?.id, a.id).page / a.totalPages) : 0;
+        const pB = b.totalPages ? (getProgress(user?.id, b.id).page / b.totalPages) : 0;
+        return pB - pA;
+      }
+      // 'recent' by default
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
+    });
+
+    return result;
+  }, [books, query, filterTab, sortBy, user?.id]);
 
   const changeView = (v) => {
     setView(v);
@@ -119,70 +172,177 @@ export function Library() {
   return (
     <AppShell>
       <div className="mx-auto max-w-7xl">
+        {/* Page Header */}
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-[#0b1619] dark:text-white">Your library</h1>
+            <span className="text-xs font-bold uppercase tracking-wider text-[#007268] dark:text-[#5fc4b8]">
+              Your Personal Sanctuary
+            </span>
+            <h1 className="mt-0.5 text-2xl sm:text-3xl font-extrabold text-[#0b1619] dark:text-white tracking-tight">
+              Library Shelf
+            </h1>
             <p className="mt-1 text-xs sm:text-sm text-[#6b7a77] dark:text-white/60">
-              Browse your books with original covers in your preferred layout.
+              Browse, organize, and continue reading your books with high-fidelity digital covers.
             </p>
           </div>
           <Link
             to="/app/upload"
-            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#009689] px-4 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold text-white shadow-xs transition hover:bg-[#007268] active:scale-[0.98]"
+            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-[#009689]/20 transition-all hover:bg-[#007268] active:scale-[0.98]"
           >
             <Upload size={17} /> Upload book
           </Link>
         </div>
 
-        <div className="mt-5 sm:mt-7 flex flex-col gap-2.5 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-3.5 text-[#8b9a93]" size={18} />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search title or author..."
-              className="w-full rounded-xl border border-[#d5ddd1] bg-white py-2.5 sm:py-3 pl-11 pr-9 text-sm outline-none focus:border-[#007268] focus:ring-2 focus:ring-[#007268]/20 dark:border-white/10 dark:bg-[#142326]"
-            />
-            {query && (
-              <button
-                onClick={() => setQuery('')}
-                className="absolute right-3 top-3 rounded-md p-0.5 text-[#8b9a93] hover:text-[#0b1619] dark:hover:text-white"
-                aria-label="Clear search"
-              >
-                <X size={16} />
-              </button>
-            )}
+        {/* Modern Statistics Bar */}
+        {books.length > 0 && (
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="flex items-center gap-3 rounded-2xl border border-[#dfe5dc] bg-white p-3.5 shadow-xs dark:border-white/10 dark:bg-[#142326]">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                <BookOpen size={18} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-lg sm:text-xl font-bold text-[#0b1619] dark:text-white">{stats.total}</p>
+                <p className="text-[11px] font-medium text-[#6b7a77] dark:text-white/60 truncate">Total Books</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-2xl border border-[#dfe5dc] bg-white p-3.5 shadow-xs dark:border-white/10 dark:bg-[#142326]">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <Flame size={18} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-lg sm:text-xl font-bold text-[#0b1619] dark:text-white">{stats.reading}</p>
+                <p className="text-[11px] font-medium text-[#6b7a77] dark:text-white/60 truncate">Reading Now</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-2xl border border-[#dfe5dc] bg-white p-3.5 shadow-xs dark:border-white/10 dark:bg-[#142326]">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={18} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-lg sm:text-xl font-bold text-[#0b1619] dark:text-white">{stats.completed}</p>
+                <p className="text-[11px] font-medium text-[#6b7a77] dark:text-white/60 truncate">Completed</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 rounded-2xl border border-[#dfe5dc] bg-white p-3.5 shadow-xs dark:border-white/10 dark:bg-[#142326]">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-stone-100 text-stone-600 dark:bg-white/10 dark:text-white/60">
+                <BookOpen size={18} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-lg sm:text-xl font-bold text-[#0b1619] dark:text-white">{stats.unread}</p>
+                <p className="text-[11px] font-medium text-[#6b7a77] dark:text-white/60 truncate">Unread Books</p>
+              </div>
+            </div>
           </div>
-          <div className="flex items-center justify-between sm:justify-start rounded-xl border border-[#d5ddd1] bg-white p-1 dark:border-white/10 dark:bg-[#142326]">
-            {viewButtons.map((btn) => {
-              const Icon = btn.icon;
-              return (
-                <button
-                  key={btn.id}
-                  title={btn.label}
-                  onClick={() => changeView(btn.id)}
-                  className={`flex-1 sm:flex-initial flex items-center justify-center rounded-lg p-2 sm:p-2.5 transition min-w-[38px] ${
-                    view === btn.id
-                      ? 'bg-[#e6f4f2] text-[#007268] font-bold dark:bg-[#009689]/20 dark:text-[#5fc4b8]'
-                      : 'text-[#7b8c84] hover:text-[#0b1619] dark:hover:text-white'
+        )}
+
+        {/* Modern Filter Pills & Controls Bar */}
+        <div className="mt-5 sm:mt-6 flex flex-col gap-3">
+          {/* Filter Pills */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+            {[
+              { id: 'all', label: 'All Books', count: stats.total },
+              { id: 'reading', label: 'Currently Reading', count: stats.reading },
+              { id: 'completed', label: 'Completed', count: stats.completed },
+              { id: 'unread', label: 'Unread', count: stats.unread },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setFilterTab(tab.id)}
+                className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                  filterTab === tab.id
+                    ? 'bg-[#009689] text-white shadow-xs'
+                    : 'border border-[#dfe5dc] bg-white text-[#556864] hover:bg-[#f6f4ee] dark:border-white/10 dark:bg-[#142326] dark:text-white/70 dark:hover:bg-white/5'
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span
+                  className={`rounded-full px-1.5 py-0.2 text-[10px] font-extrabold ${
+                    filterTab === tab.id
+                      ? 'bg-white/20 text-white'
+                      : 'bg-black/5 dark:bg-white/10 text-inherit'
                   }`}
                 >
-                  <Icon size={18} />
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Search, Sort & View Switcher */}
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 top-3.5 text-[#8b9a93]" size={18} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by title, author..."
+                className="w-full rounded-xl border border-[#d5ddd1] bg-white py-2.5 sm:py-3 pl-11 pr-9 text-sm outline-none transition focus:border-[#007268] focus:ring-2 focus:ring-[#007268]/20 dark:border-white/10 dark:bg-[#142326]"
+              />
+              {query && (
+                <button
+                  onClick={() => setQuery('')}
+                  className="absolute right-3 top-3 rounded-md p-0.5 text-[#8b9a93] hover:text-[#0b1619] dark:hover:text-white"
+                  aria-label="Clear search"
+                >
+                  <X size={16} />
                 </button>
-              );
-            })}
+              )}
+            </div>
+
+            {/* Sort Dropdown */}
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="h-[46px] rounded-xl border border-[#d5ddd1] bg-white px-3.5 pr-8 text-xs font-semibold outline-none focus:border-[#007268] dark:border-white/10 dark:bg-[#142326] cursor-pointer appearance-none"
+                  aria-label="Sort books by"
+                >
+                  <option value="recent">Recently Added</option>
+                  <option value="title">Title (A - Z)</option>
+                  <option value="progress">Highest Progress</option>
+                </select>
+                <ArrowUpDown size={14} className="pointer-events-none absolute right-2.5 top-4 text-[#8b9a93]" />
+              </div>
+
+              {/* View Switcher */}
+              <div className="flex items-center rounded-xl border border-[#d5ddd1] bg-white p-1 dark:border-white/10 dark:bg-[#142326]">
+                {viewButtons.map((btn) => {
+                  const Icon = btn.icon;
+                  return (
+                    <button
+                      key={btn.id}
+                      title={btn.label}
+                      onClick={() => changeView(btn.id)}
+                      className={`flex items-center justify-center rounded-lg p-2 sm:p-2.5 transition min-w-[38px] cursor-pointer ${
+                        view === btn.id
+                          ? 'bg-[#e6f4f2] text-[#007268] font-bold shadow-2xs dark:bg-[#009689]/20 dark:text-[#5fc4b8]'
+                          : 'text-[#7b8c84] hover:text-[#0b1619] dark:hover:text-white'
+                      }`}
+                    >
+                      <Icon size={18} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 
+        {/* Books Container */}
         {filtered.length ? (
           <div
             className={`mt-5 sm:mt-7 ${
               view === 'grid'
-                ? 'grid grid-cols-2 gap-3 sm:gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'
+                ? 'grid grid-cols-2 gap-3.5 sm:gap-5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'
                 : view === 'wide'
                 ? 'grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'
                 : view === 'shelf'
-                ? 'space-y-2.5 sm:space-y-3'
+                ? 'space-y-3'
                 : 'divide-y divide-[#e4e1d6] dark:divide-white/10'
             }`}
           >
@@ -196,6 +356,7 @@ export function Library() {
                   key={book.id}
                   book={book}
                   progress={pct}
+                  currentPage={page}
                   view={view === 'wide' ? 'grid' : view}
                   onOpen={() => navigate(`/app/reader/${book.id}`)}
                   onDelete={() => setBookToDelete(book)}

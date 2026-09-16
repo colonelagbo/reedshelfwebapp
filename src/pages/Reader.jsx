@@ -23,7 +23,10 @@ import {
   Sun,
   Moon,
   Coffee,
-  RotateCcw
+  RotateCcw,
+  Pause,
+  Target,
+  CheckCircle2
 } from 'lucide-react';
 import {
   getBookFile,
@@ -35,7 +38,10 @@ import {
   saveHighlight,
   deleteHighlight,
   updateBook,
-  saveBookFile
+  saveBookFile,
+  recordDailyReadingProgress,
+  markDailyQuotaCelebrated,
+  getDailyReadingStatus
 } from '../lib/appStore';
 
 // Configure worker URL using Vite asset bundle with fallback
@@ -104,6 +110,11 @@ export function Reader() {
   const [toastMessage, setToastMessage] = useState('');
   const [copiedId, setCopiedId] = useState(null);
 
+  // Daily reading quota celebration state
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [quotaDetails, setQuotaDetails] = useState(null);
+  const [dailyStatus, setDailyStatus] = useState(() => (user && bookId ? getDailyReadingStatus(user.id, bookId) : null));
+
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const textLayerRef = useRef(null);
@@ -118,6 +129,18 @@ export function Reader() {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 2500);
   }, []);
+
+  const handlePauseTillTomorrow = () => {
+    if (user && bookId) {
+      saveProgress(user.id, bookId, currentPage);
+    }
+    setShowQuotaModal(false);
+    navigate('/app/library');
+  };
+
+  const handleKeepGoing = () => {
+    setShowQuotaModal(false);
+  };
 
   // 1. Load PDF document from Storage
   const loadDocument = useCallback(async () => {
@@ -201,6 +224,22 @@ export function Reader() {
     }, 400);
     return () => clearTimeout(t);
   }, [currentPage, user, bookId]);
+
+  // 2b. Track daily reading quota and trigger milestone modal
+  useEffect(() => {
+    if (!user || !bookId || loading) return;
+    const res = recordDailyReadingProgress(user.id, bookId, currentPage);
+    setDailyStatus(getDailyReadingStatus(user.id, bookId));
+
+    if (res?.shouldCelebrate) {
+      setQuotaDetails({
+        quota: res.quota,
+        pagesReadToday: res.pagesReadToday,
+      });
+      setShowQuotaModal(true);
+      markDailyQuotaCelebrated(user.id, bookId);
+    }
+  }, [currentPage, user, bookId, loading]);
 
   // 3. Render current page on canvas + TextLayer
   const renderPage = useCallback(async () => {
@@ -591,6 +630,22 @@ export function Reader() {
 
         {/* Right: Theme, Highlights, Fullscreen */}
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+          {/* Daily Reading Goal Status Pill */}
+          {dailyStatus && (
+            <div
+              className={`hidden md:inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[11px] font-bold border transition ${
+                dailyStatus.isMet
+                  ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-400'
+                  : 'border-white/10 bg-white/5 text-white/80'
+              }`}
+              title={`Today's Reading Quota: ${dailyStatus.pagesReadToday}/${dailyStatus.quota} pages read today`}
+            >
+              <Target size={12} className={dailyStatus.isMet ? 'text-emerald-400' : 'text-[#5fc4b8]'} />
+              <span>Today: {dailyStatus.pagesReadToday}/{dailyStatus.quota}p</span>
+              {dailyStatus.isMet && <Check size={11} strokeWidth={3} className="text-emerald-400" />}
+            </div>
+          )}
+
           {/* Reader Theme Switcher */}
           <div className="flex items-center gap-0.5 rounded-xl border border-white/10 bg-white/5 p-0.5 sm:p-1">
             <button
@@ -883,6 +938,75 @@ export function Reader() {
           <span>Swipe or tap arrows to turn pages</span>
         </div>
       </footer>
+
+      {/* Daily Reading Quota Met Milestone Modal */}
+      {showQuotaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in">
+          <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-[#009689]/40 bg-white p-6 sm:p-8 text-[#0b1619] shadow-2xl dark:border-[#5fc4b8]/30 dark:bg-[#122326] dark:text-white">
+            {/* Background Glow Accents */}
+            <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full bg-[#009689]/20 blur-3xl" />
+            <div className="pointer-events-none absolute -left-12 -bottom-12 h-40 w-40 rounded-full bg-amber-400/15 blur-3xl" />
+
+            {/* Close Button */}
+            <button
+              onClick={handleKeepGoing}
+              className="absolute right-4 top-4 rounded-xl p-1.5 text-[#7b8c84] transition hover:bg-black/5 dark:text-white/60 dark:hover:bg-white/10 cursor-pointer"
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+
+            {/* Icon Banner */}
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#009689] to-[#007268] text-white shadow-lg shadow-[#009689]/30">
+              <Sparkles size={30} className="animate-pulse" />
+            </div>
+
+            {/* Header & Exact User Requirement Message */}
+            <div className="mt-5 text-center">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 size={14} /> Goal Achieved for Today
+              </span>
+
+              <h3 className="mt-3 text-xl sm:text-2xl font-black tracking-tight text-[#0b1619] dark:text-white">
+                Daily Goal Reached! 🎉
+              </h3>
+
+              {/* Exact user-requested message */}
+              <p className="mt-3.5 text-sm sm:text-base font-semibold leading-relaxed text-[#2c3e39] dark:text-white/90">
+                You have met your reading requirement for today, you can pause till tomorrow or you can keep going.
+              </p>
+
+              {quotaDetails && (
+                <div className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-[#e6f4f2] px-4 py-2.5 text-xs font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                  <Target size={15} />
+                  <span>Completed {quotaDetails.pagesReadToday} pages today (Quota: {quotaDetails.quota} pages)</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Decision Buttons */}
+            <div className="mt-6 flex flex-col sm:flex-row gap-2.5">
+              <button
+                type="button"
+                onClick={handlePauseTillTomorrow}
+                className="flex-1 inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] px-4 py-3 text-xs sm:text-sm font-bold text-[#0b1619] transition hover:bg-[#f0eee6] active:scale-[0.98] dark:border-white/15 dark:bg-white/5 dark:text-white dark:hover:bg-white/10 cursor-pointer"
+              >
+                <Pause size={16} />
+                <span>Pause till tomorrow</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleKeepGoing}
+                className="flex-1 inline-flex min-h-[46px] items-center justify-center gap-2 rounded-xl bg-[#009689] px-4 py-3 text-xs sm:text-sm font-bold text-white shadow-md shadow-[#009689]/25 transition hover:bg-[#007268] active:scale-[0.98] cursor-pointer"
+              >
+                <Play size={16} fill="currentColor" />
+                <span>Keep going</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
