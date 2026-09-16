@@ -8,10 +8,12 @@ import { syncBooksFromCloud, recordBook, removeBookFromCloud } from '../storage/
 
 export const booksRouter = express.Router();
 
+export const ACCOUNT_STORAGE_LIMIT_BYTES = 50 * 1024 * 1024; // 50MB (52,428,800 bytes)
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 100 * 1024 * 1024, // 100MB max
+    fileSize: ACCOUNT_STORAGE_LIMIT_BYTES, // 50MB max upload per file
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
@@ -41,6 +43,47 @@ function formatBookRow(b) {
   };
 }
 
+// GET /api/books/storage-usage - Get current account storage consumption
+booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
+  try {
+    const isUserAdmin = req.user.role === 'admin';
+    const usageRow = db.get(
+      'SELECT COALESCE(SUM(file_size), 0) as totalBytes, COUNT(id) as totalBooks FROM books WHERE uploaded_by = ?',
+      [req.user.id]
+    );
+    let usedBytes = Number(usageRow?.totalBytes || 0);
+    let totalBooks = Number(usageRow?.totalBooks || 0);
+
+    // If admin has not yet uploaded books under their specific ID, count managed library books
+    if (isUserAdmin && totalBooks === 0) {
+      const allRow = db.get('SELECT COALESCE(SUM(file_size), 0) as totalBytes, COUNT(id) as totalBooks FROM books');
+      usedBytes = Number(allRow?.totalBytes || 0);
+      totalBooks = Number(allRow?.totalBooks || 0);
+    }
+
+    const maxBytes = ACCOUNT_STORAGE_LIMIT_BYTES;
+    const remainingBytes = Math.max(0, maxBytes - usedBytes);
+    const usedMB = Number((usedBytes / (1024 * 1024)).toFixed(2));
+    const maxMB = 50;
+    const remainingMB = Number((remainingBytes / (1024 * 1024)).toFixed(2));
+    const percentUsed = Math.min(100, Number(((usedBytes / maxBytes) * 100).toFixed(1)));
+
+    res.json({
+      usedBytes,
+      maxBytes,
+      remainingBytes,
+      usedMB,
+      maxMB,
+      remainingMB,
+      percentUsed,
+      totalBooks,
+    });
+  } catch (err) {
+    console.error('Error fetching storage usage:', err);
+    res.status(500).json({ error: 'Failed to retrieve storage usage.' });
+  }
+});
+
 // GET /api/books - Get user's books
 booksRouter.get('/', authenticateToken, async (req, res) => {
   try {
@@ -50,11 +93,11 @@ booksRouter.get('/', authenticateToken, async (req, res) => {
 
     if (supabase) {
       try {
-        const { data, error } = await supabase
-          .from('books')
-          .select('*')
-          .eq('uploaded_by', req.user.id)
-          .order('created_at', { ascending: false });
+        let query = supabase.from('books').select('*');
+        if (req.user.role !== 'admin') {
+          query = query.eq('uploaded_by', req.user.id);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false });
 
         if (!error && Array.isArray(data)) {
           supabaseBooks = data.map(formatBookRow);
@@ -146,6 +189,23 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
     const file = req.file;
     if (!file) {
       return res.status(400).json({ error: 'No PDF file was provided.' });
+    }
+
+    // Storage quota check: 50 MB allotted per account
+    const usageRow = db.get(
+      'SELECT COALESCE(SUM(file_size), 0) as totalBytes FROM books WHERE uploaded_by = ?',
+      [req.user.id]
+    );
+    const currentUsedBytes = Number(usageRow?.totalBytes || 0);
+    const newFileSize = file.size;
+
+    if (currentUsedBytes + newFileSize > ACCOUNT_STORAGE_LIMIT_BYTES) {
+      const currentUsedMB = (currentUsedBytes / (1024 * 1024)).toFixed(1);
+      const newFileSizeMB = (newFileSize / (1024 * 1024)).toFixed(1);
+      const remainingMB = Math.max(0, (ACCOUNT_STORAGE_LIMIT_BYTES - currentUsedBytes) / (1024 * 1024)).toFixed(1);
+      return res.status(400).json({
+        error: `Account storage limit exceeded! Each account has 50 MB allotted. You have used ${currentUsedMB} MB (${remainingMB} MB remaining). This book is ${newFileSizeMB} MB. Please delete existing books to free up space.`
+      });
     }
 
     const {
@@ -313,12 +373,19 @@ booksRouter.get('/:id/file', optionalToken, async (req, res) => {
 // PUT /api/books/:id - Update book metadata
 booksRouter.put('/:id', authenticateToken, async (req, res) => {
   try {
-    let book = db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [req.params.id, req.user.id]);
+    const isUserAdmin = req.user.role === 'admin';
+    let book = isUserAdmin
+      ? db.get('SELECT * FROM books WHERE id = ?', [req.params.id])
+      : db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [req.params.id, req.user.id]);
     const supabase = getSupabaseClient();
 
     if (!book && supabase) {
       try {
-        const { data } = await supabase.from('books').select('*').eq('id', req.params.id).eq('uploaded_by', req.user.id).single();
+        let q = supabase.from('books').select('*').eq('id', req.params.id);
+        if (!isUserAdmin) {
+          q = q.eq('uploaded_by', req.user.id);
+        }
+        const { data } = await q.single();
         if (data) book = data;
       } catch {
         // Ignore
@@ -383,12 +450,19 @@ booksRouter.put('/:id', authenticateToken, async (req, res) => {
 booksRouter.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const bookId = req.params.id;
-    let book = db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [bookId, req.user.id]);
+    const isUserAdmin = req.user.role === 'admin';
+    let book = isUserAdmin
+      ? db.get('SELECT * FROM books WHERE id = ?', [bookId])
+      : db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [bookId, req.user.id]);
     const supabase = getSupabaseClient();
 
     if (!book && supabase) {
       try {
-        const { data } = await supabase.from('books').select('*').eq('id', bookId).eq('uploaded_by', req.user.id).single();
+        let q = supabase.from('books').select('*').eq('id', bookId);
+        if (!isUserAdmin) {
+          q = q.eq('uploaded_by', req.user.id);
+        }
+        const { data } = await q.single();
         if (data) book = data;
       } catch {
         // Ignore

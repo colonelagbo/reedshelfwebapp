@@ -9,10 +9,12 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
-  ArrowLeft
+  ArrowLeft,
+  HardDrive
 } from 'lucide-react';
+import { useEffect } from 'react';
 import { AppShell } from '../components/AppShell';
-import { addBook, getCurrentUser, saveBookFile, uploadBookFileToCloudflare } from '../lib/appStore';
+import { addBook, getCurrentUser, getUserStorageUsage, saveBookFile, uploadBookFileToCloudflare } from '../lib/appStore';
 import { extractPdfInfo } from '../lib/pdfMetadata';
 import { supabase } from '../lib/supabaseClient';
 
@@ -27,6 +29,17 @@ export function Upload() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [storage, setStorage] = useState(() => getUserStorageUsage(user?.id));
+
+  useEffect(() => {
+    const updateStorage = () => {
+      const u = getCurrentUser();
+      setStorage(getUserStorageUsage(u?.id));
+    };
+    updateStorage();
+    window.addEventListener('reedshelf:books_updated', updateStorage);
+    return () => window.removeEventListener('reedshelf:books_updated', updateStorage);
+  }, []);
 
   const processFile = async (f) => {
     setError('');
@@ -39,6 +52,14 @@ export function Upload() {
 
     if (f.size > 50 * 1024 * 1024) {
       setError('PDFs must be 50MB or smaller.');
+      return;
+    }
+
+    const currentStorage = getUserStorageUsage(user?.id);
+    if (f.size > currentStorage.remainingBytes) {
+      setError(
+        `Upload exceeds your available account storage! You have ${currentStorage.remainingMB} MB remaining of your 50 MB quota. This file is ${(f.size / (1024 * 1024)).toFixed(1)} MB. Please delete existing books to free up space.`
+      );
       return;
     }
 
@@ -260,9 +281,40 @@ export function Upload() {
           </button>
         </div>
 
+        {/* Account Storage Quota Banner */}
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[#e4e1d6] bg-[#f6f4ee] p-3.5 dark:border-white/10 dark:bg-white/5">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8] shrink-0">
+              <HardDrive size={16} />
+            </span>
+            <div>
+              <p className="text-xs font-bold text-[#0b1619] dark:text-white">
+                Account Storage: {storage.usedMB} MB / 50 MB
+              </p>
+              <p className="text-[11px] text-[#6b7a77] dark:text-white/60">
+                {storage.remainingMB} MB available for new books ({storage.percentUsed}% used)
+              </p>
+            </div>
+          </div>
+          <div className="w-full sm:w-44">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-[#e4e1d6] dark:bg-white/10">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${
+                  storage.percentUsed > 90
+                    ? 'bg-red-500'
+                    : storage.percentUsed > 70
+                    ? 'bg-amber-500'
+                    : 'bg-[#009689] dark:bg-[#5fc4b8]'
+                }`}
+                style={{ width: `${Math.max(4, Math.min(100, storage.percentUsed))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
         <form
           onSubmit={handleSubmit}
-          className="mt-5 rounded-3xl border border-[#e4e1d6] bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#12232a] sm:mt-7 sm:p-8"
+          className="mt-4 rounded-3xl border border-[#e4e1d6] bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#12232a] sm:p-8"
         >
           {error && (
             <div className="mb-5 flex items-start gap-2.5 rounded-xl bg-[#fff1ef] p-3.5 text-sm text-[#9b5147] dark:bg-[#3a1a17] dark:text-[#fca5a5]">

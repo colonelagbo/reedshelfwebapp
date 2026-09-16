@@ -14,7 +14,8 @@ import {
   X,
   CheckCircle2,
   Flame,
-  ArrowUpDown
+  ArrowUpDown,
+  HardDrive
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { BookCard } from '../components/BookCard';
@@ -22,6 +23,7 @@ import {
   getCurrentUser,
   getBooks,
   getUserBooks,
+  getUserStorageUsage,
   fetchBooks,
   getProgress,
   getSettings,
@@ -53,31 +55,36 @@ export function Library() {
   const [sortBy, setSortBy] = useState('recent');
   const [bookToDelete, setBookToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [storage, setStorage] = useState(() => getUserStorageUsage(user?.id));
   const navigate = useNavigate();
 
   const loadBooks = useCallback(async () => {
     const activeUser = getCurrentUser();
     const activeId = activeUser?.id;
+    const isAdmin = activeUser?.role === 'admin';
 
     if (activeUser && activeUser.id !== user?.id) {
       setUser(activeUser);
     }
 
     // Load instantly from local storage cache
-    const initial = activeId ? getUserBooks(activeId) : getBooks();
+    const initial = (activeId && !isAdmin) ? getUserBooks(activeId) : getBooks();
     if (initial.length > 0) {
       setBooks(initial);
+      setStorage(getUserStorageUsage(activeId));
       setLoading(false);
     }
 
     try {
       const fetched = await fetchBooks();
       if (Array.isArray(fetched)) {
-        const filtered = activeId ? fetched.filter((b) => {
+        // Admins see all books in the database; regular users see their uploaded books
+        const filtered = (activeId && !isAdmin) ? fetched.filter((b) => {
           const owner = b.uploadedBy || b.uploaded_by;
           return !owner || owner === activeId || owner === 'demo_user';
         }) : fetched;
         setBooks(filtered);
+        setStorage(getUserStorageUsage(activeId));
       }
     } catch (e) {
       console.warn('Could not load remote books:', e);
@@ -89,6 +96,19 @@ export function Library() {
 
   useEffect(() => {
     loadBooks();
+  }, [loadBooks]);
+
+  // Keep storage and books list synchronized across upload/delete/cloud updates
+  useEffect(() => {
+    setStorage(getUserStorageUsage(user?.id));
+  }, [books, user?.id]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      loadBooks();
+    };
+    window.addEventListener('reedshelf:books_updated', handleUpdate);
+    return () => window.removeEventListener('reedshelf:books_updated', handleUpdate);
   }, [loadBooks]);
 
   // Statistics calculation
@@ -160,7 +180,13 @@ export function Library() {
     try {
       await deleteBook(bookToDelete.id);
       const updated = await fetchBooks();
-      setBooks(updated);
+      const isAdmin = user?.role === 'admin';
+      const filtered = (user?.id && !isAdmin) ? updated.filter((b) => {
+        const owner = b.uploadedBy || b.uploaded_by;
+        return !owner || owner === user.id || owner === 'demo_user';
+      }) : updated;
+      setBooks(filtered);
+      setStorage(getUserStorageUsage(user?.id));
       setBookToDelete(null);
     } catch (err) {
       console.error('Failed to delete book:', err);
@@ -185,12 +211,24 @@ export function Library() {
               Browse, organize, and continue reading your books with high-fidelity digital covers.
             </p>
           </div>
-          <Link
-            to="/app/upload"
-            className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-[#009689]/20 transition-all hover:bg-[#007268] active:scale-[0.98]"
-          >
-            <Upload size={17} /> Upload book
-          </Link>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <Link
+              to="/app/profile"
+              className="inline-flex items-center gap-2 rounded-xl border border-[#dfe5dc] bg-white px-3.5 py-2.5 text-xs font-semibold text-[#0b1619] shadow-xs hover:border-[#009689] dark:border-white/10 dark:bg-[#142326] dark:text-white transition"
+              title="Account storage quota: 50 MB"
+            >
+              <HardDrive size={15} className="text-[#009689] dark:text-[#5fc4b8]" />
+              <span>Storage:</span>
+              <span className="font-bold text-[#009689] dark:text-[#5fc4b8]">{storage.usedMB} / 50 MB</span>
+              <span className="hidden xs:inline text-[11px] text-[#7b8c84] dark:text-white/40">({storage.remainingMB} MB free)</span>
+            </Link>
+            <Link
+              to="/app/upload"
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[#009689] px-5 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-[#009689]/20 transition-all hover:bg-[#007268] active:scale-[0.98]"
+            >
+              <Upload size={17} /> Upload book
+            </Link>
+          </div>
         </div>
 
         {/* Modern Statistics Bar */}

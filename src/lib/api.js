@@ -250,6 +250,10 @@ export const api = {
         method: 'DELETE',
       });
     },
+
+    async getStorageUsage() {
+      return await apiRequest('/api/books/storage-usage');
+    },
   },
 
   progress: {

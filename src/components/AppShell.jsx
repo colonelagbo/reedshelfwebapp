@@ -1,7 +1,7 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { BookOpen, Home, Library, ListChecks, Settings, UserCircle, Upload, LogOut, Menu, X, Shield, Plus, Download } from 'lucide-react';
+import { BookOpen, Home, Library, ListChecks, Settings, UserCircle, Upload, LogOut, Menu, X, Shield, Plus, Download, HardDrive } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { getCurrentUser, logoutUser, getSettings, api } from '../lib/appStore';
+import { getCurrentUser, getUserStorageUsage, logoutUser, getSettings, api } from '../lib/appStore';
 import { LogoPlaceholder } from './LogoPlaceholder';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -18,6 +18,7 @@ export function AppShell({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState(() => getCurrentUser());
+  const [storage, setStorage] = useState(() => getUserStorageUsage(user?.id));
   const isStandalone = typeof window !== 'undefined' && (
     window.matchMedia('(display-mode: standalone)').matches ||
     window.navigator.standalone === true
@@ -25,8 +26,22 @@ export function AppShell({ children }) {
 
   useEffect(() => {
     api.auth.getMe().then((res) => {
-      if (res?.user) setUser(res.user);
+      if (res?.user) {
+        setUser(res.user);
+        setStorage(getUserStorageUsage(res.user.id));
+      }
     }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const updateStorage = () => {
+      const u = getCurrentUser();
+      if (u) setUser(u);
+      setStorage(getUserStorageUsage(u?.id));
+    };
+    updateStorage();
+    window.addEventListener('reedshelf:books_updated', updateStorage);
+    return () => window.removeEventListener('reedshelf:books_updated', updateStorage);
   }, []);
 
   // Close drawer on route change
@@ -157,6 +172,35 @@ export function AppShell({ children }) {
                 );
               })}
             </nav>
+
+            {/* Account Storage Quota Meter */}
+            <div className="my-3 rounded-2xl border border-[#e4e1d6] bg-white p-3.5 shadow-2xs dark:border-white/10 dark:bg-white/5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 font-semibold text-[#0b1619] dark:text-white">
+                  <HardDrive size={14} className="text-[#009689] dark:text-[#5fc4b8]" />
+                  Storage
+                </span>
+                <span className="font-bold text-[#009689] dark:text-[#5fc4b8]">
+                  {storage.usedMB} / 50 MB
+                </span>
+              </div>
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#e4e1d6] dark:bg-white/10">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    storage.percentUsed > 90
+                      ? 'bg-red-500'
+                      : storage.percentUsed > 70
+                      ? 'bg-amber-500'
+                      : 'bg-[#009689] dark:bg-[#5fc4b8]'
+                  }`}
+                  style={{ width: `${Math.max(4, Math.min(100, storage.percentUsed))}%` }}
+                />
+              </div>
+              <div className="mt-1.5 flex items-center justify-between text-[11px] text-[#7b8c84] dark:text-white/40">
+                <span>{storage.remainingMB} MB free</span>
+                <span>{storage.percentUsed}%</span>
+              </div>
+            </div>
 
             <div className="mt-auto space-y-1 border-t border-[#e4e1d6] pt-4 dark:border-white/10">
               <NavLink

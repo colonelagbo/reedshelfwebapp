@@ -142,7 +142,16 @@ export async function resetPassword(email, newPassword) {
 }
 
 // Book operations
+export const ACCOUNT_STORAGE_LIMIT_BYTES = 50 * 1024 * 1024; // 50MB (52,428,800 bytes)
+
+function notifyBooksChanged() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('reedshelf:books_updated'));
+  }
+}
+
 export const getBooks = () => read(BOOKS_KEY, []);
+
 export const getUserBooks = (userId) => {
   const books = getBooks();
   if (!userId) return books;
@@ -154,64 +163,73 @@ export const getUserBooks = (userId) => {
   });
 };
 
+export function getUserStorageUsage(userId) {
+  const books = getBooks();
+  const user = getCurrentUser();
+  const isAdmin = user?.role === 'admin';
+
+  let userBooks = books;
+  if (userId && !isAdmin) {
+    userBooks = books.filter((b) => {
+      const owner = b.uploadedBy || b.uploaded_by;
+      return owner === userId || owner === 'demo_user' || !owner;
+    });
+  } else if (isAdmin) {
+    const adminBooks = books.filter((b) => {
+      const owner = b.uploadedBy || b.uploaded_by;
+      return owner === userId;
+    });
+    if (adminBooks.length > 0) {
+      userBooks = adminBooks;
+    }
+  }
+
+  const usedBytes = userBooks.reduce((acc, b) => acc + (Number(b.size || b.file_size) || 0), 0);
+  const maxBytes = ACCOUNT_STORAGE_LIMIT_BYTES;
+  const remainingBytes = Math.max(0, maxBytes - usedBytes);
+  const usedMB = Number((usedBytes / (1024 * 1024)).toFixed(2));
+  const maxMB = 50;
+  const remainingMB = Number((remainingBytes / (1024 * 1024)).toFixed(2));
+  const percentUsed = Math.min(100, Number(((usedBytes / maxBytes) * 100).toFixed(1)));
+
+  return {
+    usedBytes,
+    maxBytes,
+    remainingBytes,
+    usedMB,
+    maxMB,
+    remainingMB,
+    percentUsed,
+    totalBooks: userBooks.length,
+  };
+}
+
+export async function fetchStorageUsage() {
+  try {
+    const data = await api.books.getStorageUsage();
+    if (data && typeof data.usedBytes === 'number') {
+      return data;
+    }
+  } catch (err) {
+    // Fall back to local calculation
+  }
+  const user = getCurrentUser();
+  return getUserStorageUsage(user?.id);
+}
+
 export async function fetchBooks() {
   const localBooks = getBooks();
+  const user = getCurrentUser();
 
   // 1. Try fetching from Backend API
   try {
     const books = await api.books.list();
-    if (Array.isArray(books) && books.length > 0) {
-      // Merge backend books with any local books not yet synced
-      const serverIds = new Set(books.map((b) => b.id));
-      const merged = [
-        ...books,
-        ...localBooks.filter((b) => !serverIds.has(b.id)),
-      ];
-      write(BOOKS_KEY, merged);
-      return merged;
-    } else if (Array.isArray(books) && books.length === 0) {
-      // If we already have books locally, protect and keep them
-      if (localBooks.length > 0) {
-        return localBooks;
-      }
-
-      // Check if Supabase direct has books before writing empty array
-      if (supabase) {
-        const user = getCurrentUser();
-        if (user?.id) {
-          try {
-            const { data } = await supabase
-              .from('books')
-              .select('*')
-              .eq('uploaded_by', user.id)
-              .order('created_at', { ascending: false });
-            if (Array.isArray(data) && data.length > 0) {
-              const formatted = data.map((b) => ({
-                id: b.id,
-                title: b.title,
-                author: b.author,
-                fileName: b.file_name,
-                fileType: b.file_type,
-                size: Number(b.file_size || 0),
-                totalPages: Number(b.total_pages || 0),
-                uploadedBy: b.uploaded_by,
-                r2Key: b.r2_key,
-                coverDataUrl: b.cover_data_url,
-                coverUrl: b.cover_url,
-                createdAt: b.created_at,
-              }));
-              write(BOOKS_KEY, formatted);
-              return formatted;
-            }
-          } catch {
-            // Ignore
-          }
-        }
-      }
-      write(BOOKS_KEY, []);
-      return [];
+    if (Array.isArray(books)) {
+      // Authoritative cloud sync: update local cache to match server exactly
+      write(BOOKS_KEY, books);
+      notifyBooksChanged();
+      return books;
     }
-    return localBooks;
   } catch (err) {
     console.warn('Could not fetch books from backend API, checking Supabase direct:', err.message);
   }
@@ -219,13 +237,12 @@ export async function fetchBooks() {
   // 2. Direct Supabase Database fallback
   if (supabase) {
     try {
-      const user = getCurrentUser();
       if (user?.id) {
-        const { data, error } = await supabase
-          .from('books')
-          .select('*')
-          .eq('uploaded_by', user.id)
-          .order('created_at', { ascending: false });
+        let query = supabase.from('books').select('*');
+        if (user.role !== 'admin') {
+          query = query.eq('uploaded_by', user.id);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false });
 
         if (!error && Array.isArray(data) && data.length > 0) {
           const formatted = data.map((b) => ({
@@ -242,13 +259,9 @@ export async function fetchBooks() {
             coverUrl: b.cover_url,
             createdAt: b.created_at,
           }));
-          const serverIds = new Set(formatted.map((b) => b.id));
-          const merged = [
-            ...formatted,
-            ...localBooks.filter((b) => !serverIds.has(b.id)),
-          ];
-          write(BOOKS_KEY, merged);
-          return merged;
+          write(BOOKS_KEY, formatted);
+          notifyBooksChanged();
+          return formatted;
         }
       }
     } catch (sbErr) {
@@ -265,6 +278,7 @@ export async function uploadBookFile(file, metadata) {
   if (res && res.id) {
     const current = getBooks();
     write(BOOKS_KEY, [res, ...current.filter((b) => b.id !== res.id)]);
+    notifyBooksChanged();
   }
   return res;
 }
@@ -273,6 +287,7 @@ export const uploadBookFileToCloudflare = uploadBookFile;
 export function addBook(book) {
   const item = { id: uid('book'), ...book, createdAt: new Date().toISOString() };
   write(BOOKS_KEY, [item, ...getBooks()]);
+  notifyBooksChanged();
   return item;
 }
 
@@ -286,6 +301,7 @@ export async function updateBook(id, changes) {
     BOOKS_KEY,
     getBooks().map((b) => (b.id === id ? { ...b, ...changes } : b))
   );
+  notifyBooksChanged();
 }
 
 export async function deleteBook(id) {
@@ -313,6 +329,7 @@ export async function deleteBook(id) {
   write(HIGHLIGHTS_KEY, highlights);
 
   await deleteBookFile(id);
+  notifyBooksChanged();
 }
 
 // Progress

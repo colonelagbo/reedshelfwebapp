@@ -392,6 +392,17 @@ function queryFallback(sql, params, mode) {
     }
 
     // D. Aggregation queries: COUNT(*), SUM(file_size), etc.
+    if (lower.includes('sum(file_size)') && lower.includes('from books')) {
+      let filteredBooks = jsonStore.data.books;
+      if (lower.includes('where uploaded_by =') && params.length >= 1) {
+        filteredBooks = filteredBooks.filter(b => b.uploaded_by === params[0]);
+      }
+      const totalBytes = filteredBooks.reduce((acc, b) => acc + (Number(b.file_size || b.size) || 0), 0);
+      const totalBooks = filteredBooks.length;
+      const row = { totalBytes, totalBooks, count: totalBooks, size: totalBytes };
+      return mode === 'get' ? row : [row];
+    }
+
     if (lower.includes('count(*) as count, coalesce(sum(file_size), 0) as size from books')) {
       const size = jsonStore.data.books.reduce((acc, b) => acc + (Number(b.file_size) || 0), 0);
       const row = { count: jsonStore.data.books.length, size };

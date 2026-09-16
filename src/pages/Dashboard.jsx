@@ -14,14 +14,27 @@ export function Dashboard() {
   useEffect(() => {
     if (!user?.id) return;
 
-    fetchBooks().then((b) => {
-      if (b && Array.isArray(b)) setBooks(b);
-    }).catch(() => {});
+    const loadData = () => {
+      fetchBooks().then((b) => {
+        if (b && Array.isArray(b)) {
+          const isAdmin = user?.role === 'admin';
+          const filtered = (user?.id && !isAdmin) ? b.filter((item) => {
+            const owner = item.uploadedBy || item.uploaded_by;
+            return !owner || owner === user.id || owner === 'demo_user';
+          }) : b;
+          setBooks(filtered);
+        }
+      }).catch(() => {});
 
-    fetchPlans().then((p) => {
-      if (p && Array.isArray(p)) setPlans(p);
-    }).catch(() => {});
-  }, [user?.id]);
+      fetchPlans().then((p) => {
+        if (p && Array.isArray(p)) setPlans(p);
+      }).catch(() => {});
+    };
+
+    loadData();
+    window.addEventListener('reedshelf:books_updated', loadData);
+    return () => window.removeEventListener('reedshelf:books_updated', loadData);
+  }, [user?.id, user?.role]);
 
   const progress = (b) => {
     const p = getProgress(user?.id, b.id).page;

@@ -15,13 +15,15 @@ import {
   Shield,
   ArrowRight,
   Smartphone,
-  Download
+  Download,
+  HardDrive
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import {
   getCurrentUser,
   getUserBooks,
   getUserPlans,
+  getUserStorageUsage,
   updateUser,
   fetchBooks,
   fetchPlans,
@@ -35,6 +37,7 @@ export function Profile() {
   const [currentUserData, setCurrentUserData] = useState(user);
   const [books, setBooks] = useState(() => (user?.id ? getUserBooks(user.id) : []));
   const [plans, setPlans] = useState(() => (user?.id ? getUserPlans(user.id) : []));
+  const [storage, setStorage] = useState(() => getUserStorageUsage(user?.id));
   const [name, setName] = useState(user?.name || '');
   const [avatar, setAvatar] = useState(user?.avatar || '');
   const [current, setCurrent] = useState('');
@@ -49,15 +52,28 @@ export function Profile() {
   useEffect(() => {
     if (!user?.id) return;
 
-    fetchBooks().then((b) => b && Array.isArray(b) && setBooks(b)).catch(() => {});
-    fetchPlans().then((p) => p && Array.isArray(p) && setPlans(p)).catch(() => {});
+    const refresh = () => {
+      fetchBooks().then((b) => {
+        if (b && Array.isArray(b)) {
+          setBooks(b);
+          setStorage(getUserStorageUsage(user?.id));
+        }
+      }).catch(() => {});
+      fetchPlans().then((p) => p && Array.isArray(p) && setPlans(p)).catch(() => {});
+    };
+
+    refresh();
 
     api.auth.getMe().then((res) => {
       if (res?.user) {
         setCurrentUserData(res.user);
         setCurrentUser(res.user);
+        setStorage(getUserStorageUsage(res.user.id));
       }
     }).catch(() => {});
+
+    window.addEventListener('reedshelf:books_updated', refresh);
+    return () => window.removeEventListener('reedshelf:books_updated', refresh);
   }, [user?.id]);
 
   const handleDisable2FA = async () => {
@@ -363,6 +379,67 @@ export function Profile() {
               </div>
             </section>
           )}
+
+          {/* Account Storage Quota (50 MB allotted per account) */}
+          <section className="rounded-3xl border border-[#e4e1d6] bg-white p-6 dark:border-white/10 dark:bg-[#142326] sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8] shrink-0">
+                  <HardDrive size={20} />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-bold text-lg">Account Storage</h2>
+                    <span className="inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                      50 MB Allotted
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60 leading-relaxed">
+                    Each account is allocated 50 MB of cloud storage for PDF books. Quota updates automatically each time a book is uploaded or deleted.
+                  </p>
+                </div>
+              </div>
+              <span className="shrink-0 text-sm font-bold text-[#009689] dark:text-[#5fc4b8]">
+                {storage.percentUsed}% used
+              </span>
+            </div>
+
+            {/* Storage Progress Bar */}
+            <div className="mt-6">
+              <div className="h-3 w-full overflow-hidden rounded-full bg-[#e4e1d6] dark:bg-white/10">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    storage.percentUsed > 90
+                      ? 'bg-red-500'
+                      : storage.percentUsed > 70
+                      ? 'bg-amber-500'
+                      : 'bg-[#009689] dark:bg-[#5fc4b8]'
+                  }`}
+                  style={{ width: `${Math.max(2, Math.min(100, storage.percentUsed))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Storage Metric Tiles */}
+            <div className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="rounded-2xl bg-[#f6f4ee] p-3.5 dark:bg-white/5">
+                <p className="text-xs text-[#7b8c84] dark:text-white/50">Space Used</p>
+                <p className="mt-1 text-lg font-bold text-[#0b1619] dark:text-white">{storage.usedMB} MB</p>
+              </div>
+              <div className="rounded-2xl bg-[#f6f4ee] p-3.5 dark:bg-white/5">
+                <p className="text-xs text-[#7b8c84] dark:text-white/50">Space Available</p>
+                <p className="mt-1 text-lg font-bold text-emerald-600 dark:text-emerald-400">{storage.remainingMB} MB</p>
+              </div>
+              <div className="rounded-2xl bg-[#f6f4ee] p-3.5 dark:bg-white/5">
+                <p className="text-xs text-[#7b8c84] dark:text-white/50">Total Quota</p>
+                <p className="mt-1 text-lg font-bold text-[#0b1619] dark:text-white">50.0 MB</p>
+              </div>
+              <div className="rounded-2xl bg-[#f6f4ee] p-3.5 dark:bg-white/5">
+                <p className="text-xs text-[#7b8c84] dark:text-white/50">Books Stored</p>
+                <p className="mt-1 text-lg font-bold text-[#009689] dark:text-[#5fc4b8]">{storage.totalBooks}</p>
+              </div>
+            </div>
+          </section>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="rounded-2xl bg-[#f6f4ee] p-5 dark:bg-white/5">
