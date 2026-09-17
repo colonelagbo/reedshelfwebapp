@@ -26,5 +26,22 @@ export const config = {
 
   isSupabaseConfigured() {
     return Boolean(this.supabase.url && this.supabase.key);
+  },
+
+  cloudflare: {
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID || process.env.R2_ACCOUNT_ID || '',
+    accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID || process.env.R2_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY || process.env.R2_SECRET_ACCESS_KEY || '',
+    bucketName: process.env.CLOUDFLARE_R2_BUCKET_NAME || process.env.R2_BUCKET_NAME || 'reedshelf-books',
+    publicUrl: process.env.CLOUDFLARE_R2_PUBLIC_URL || process.env.R2_PUBLIC_URL || '',
+  },
+
+  isR2Configured() {
+    return Boolean(
+      this.cloudflare.accountId &&
+      this.cloudflare.accessKeyId &&
+      this.cloudflare.secretAccessKey &&
+      this.cloudflare.bucketName
+    );
   }
 };

@@ -212,6 +212,27 @@ export const r2Storage = {
   },
 
   /**
+   * Generate a presigned PUT URL for direct browser-to-R2 upload
+   * (Supports files up to 50MB and completely bypasses serverless payload limits)
+   */
+  async getPresignedUploadUrl(key, contentType = 'application/pdf', expiresInSeconds = 3600) {
+    const client = getS3Client();
+    if (!client) return null;
+
+    try {
+      const command = new PutObjectCommand({
+        Bucket: config.cloudflare.bucketName,
+        Key: key,
+        ContentType: contentType,
+      });
+      return await getSignedUrl(client, command, { expiresIn: expiresInSeconds });
+    } catch (err) {
+      console.warn(`[R2 Warning] Failed to generate presigned upload URL for ${key}:`, err.message);
+      return null;
+    }
+  },
+
+  /**
    * Verify Cloudflare R2 connectivity
    */
   async testConnection() {

@@ -208,3 +208,68 @@ CREATE POLICY "Admins only can view audit logs"
 CREATE POLICY "Admins only can insert audit logs"
   ON public.admin_audit_logs FOR INSERT
   WITH CHECK (public.is_admin());
+
+-- Reading Progress policies
+CREATE POLICY "Users can manage their own reading progress or admins can view"
+  ON public.reading_progress FOR ALL
+  USING (user_id = auth.uid()::text OR public.is_admin())
+  WITH CHECK (user_id = auth.uid()::text OR public.is_admin());
+
+-- Reading Plans policies
+CREATE POLICY "Users can manage their own reading plans or admins can view"
+  ON public.reading_plans FOR ALL
+  USING (user_id = auth.uid()::text OR public.is_admin())
+  WITH CHECK (user_id = auth.uid()::text OR public.is_admin());
+
+-- Highlights policies
+CREATE POLICY "Users can manage their own highlights or admins can view"
+  ON public.highlights FOR ALL
+  USING (user_id = auth.uid()::text OR public.is_admin())
+  WITH CHECK (user_id = auth.uid()::text OR public.is_admin());
+
+-- User Settings policies
+CREATE POLICY "Users can manage their own settings or admins can view"
+  ON public.user_settings FOR ALL
+  USING (user_id = auth.uid()::text OR public.is_admin())
+  WITH CHECK (user_id = auth.uid()::text OR public.is_admin());
+
+-- Reading Activity policies
+CREATE POLICY "Users can manage their own reading activity or admins can view"
+  ON public.reading_activity FOR ALL
+  USING (user_id = auth.uid()::text OR public.is_admin())
+  WITH CHECK (user_id = auth.uid()::text OR public.is_admin());
+
+-- ============================================================================
+-- AUTOMATIC SYNC FROM SUPABASE AUTH TO PUBLIC.USERS
+-- ============================================================================
+CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.users (id, name, email, avatar, role, status, created_at)
+  VALUES (
+    NEW.id::text,
+    COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+    NEW.email,
+    NEW.raw_user_meta_data->>'avatar',
+    CASE WHEN LOWER(NEW.email) = 'link4emmy@gmail.com' THEN 'admin' ELSE COALESCE(NEW.raw_user_meta_data->>'role', 'user') END,
+    'active',
+    NOW()
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    name = COALESCE(EXCLUDED.name, public.users.name);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_auth_user();
+
+-- Seed initial records
+INSERT INTO public.users (id, name, email, role, status, created_at)
+VALUES 
+  ('admin_usr_link4emmy', 'Platform Admin', 'link4emmy@gmail.com', 'admin', 'active', NOW()),
+  ('demo_user', 'Demo Reader', 'demo@reedshelf.app', 'user', 'active', NOW())
+ON CONFLICT (id) DO NOTHING;

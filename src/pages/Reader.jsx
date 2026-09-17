@@ -302,11 +302,10 @@ export function Reader() {
         ? container.clientHeight
         : Math.max(300, window.innerHeight - 104);
 
-      const unscaledViewport = page.getViewport({ scale: 1.0 });
-
-      // Clean padding around the page so it fits comfortably within the screen bezels
-      const padX = containerWidth < 640 ? 10 : 24;
-      const padY = containerHeight < 640 ? 10 : 20;
+      // Responsive padding so pages fit comfortably within any display
+      const isMobile = containerWidth < 640;
+      const padX = isMobile ? 2 : 12;
+      const padY = isMobile ? 4 : 10;
 
       const availableWidth = Math.max(160, containerWidth - padX * 2);
       const availableHeight = Math.max(160, containerHeight - padY * 2);
@@ -656,7 +655,7 @@ export function Reader() {
           <button
             type="button"
             onClick={handleExitBook}
-            className="group flex h-9 sm:h-10 items-center gap-1.5 rounded-xl bg-white/10 px-3 sm:px-3.5 text-xs sm:text-sm font-bold text-white transition hover:bg-[#009689] shrink-0 active:scale-95 cursor-pointer touch-manipulation border border-white/15"
+            className="group flex h-9 sm:h-10 items-center gap-1.5 rounded-xl bg-[#009689] px-3 sm:px-3.5 text-xs sm:text-sm font-bold text-white shadow-xs transition hover:bg-[#007268] shrink-0 active:scale-95 cursor-pointer touch-manipulation border border-[#009689]"
             title="Exit book and return to library (Escape)"
             aria-label="Exit book"
           >
@@ -820,11 +819,11 @@ export function Reader() {
           <button
             type="button"
             onClick={handleExitBook}
-            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-white/10 opacity-85 transition hover:bg-red-600/80 hover:opacity-100 hover:text-white cursor-pointer touch-manipulation"
-            title="Exit book"
+            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-black/10 dark:bg-white/10 opacity-90 transition hover:bg-red-600 hover:text-white cursor-pointer touch-manipulation"
+            title="Exit book and return to library"
             aria-label="Exit book"
           >
-            <X size={17} />
+            <X size={18} />
           </button>
         </div>
       </header>
@@ -835,7 +834,7 @@ export function Reader() {
           ref={containerRef}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          className={`relative flex flex-1 items-center justify-center p-1.5 sm:p-3 select-none ${
+          className={`relative flex flex-1 items-center justify-center p-0 sm:p-1 select-none ${
             fitMode === 'custom' ? 'overflow-auto' : 'overflow-hidden'
           }`}
         >

@@ -163,13 +163,57 @@ export function Upload() {
         );
       }
 
-      // 2. Direct Cloud Storage Upload (bypasses Vercel 4.5 MB FUNCTION_PAYLOAD_TOO_LARGE limit completely)
-      if (supabase && isSupabaseConfigured()) {
-        const bookId = `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
-        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const storageKey = `books/${currentUserId}/${bookId}/${safeName}`;
+      // 2. Direct Cloud Storage Upload (Cloudflare R2 or Supabase Storage)
+      // Bypasses Vercel 4.5 MB FUNCTION_PAYLOAD_TOO_LARGE limit completely, up to 50 MB
+      let uploadPrep = null;
+      try {
+        uploadPrep = await api.books.getUploadUrl({
+          fileName: file.name,
+          fileSize: file.size,
+          contentType: file.type || 'application/pdf',
+        });
+      } catch (prepErr) {
+        console.warn('Could not retrieve upload URL from backend:', prepErr.message);
+      }
 
-        console.log(`[Upload] Uploading ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) directly to Cloud Storage...`);
+      if (uploadPrep?.storageType === 'r2' && uploadPrep.uploadUrl) {
+        // Direct Cloudflare R2 presigned PUT upload
+        console.log(`[Upload] Uploading ${file.name} directly to Cloudflare R2...`);
+        const r2Res = await fetch(uploadPrep.uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': file.type || 'application/pdf',
+          },
+          body: file,
+        });
+
+        if (!r2Res.ok) {
+          throw new Error(`Failed to upload to Cloudflare R2: ${r2Res.statusText} (${r2Res.status})`);
+        }
+        console.log(`[Upload] Cloudflare R2 upload complete: ${uploadPrep.storageKey}`);
+
+        const coverUrl = `/api/books/${uploadPrep.bookId}/file`;
+        book = await api.books.recordBook({
+          id: uploadPrep.bookId,
+          title,
+          author,
+          fileName: file.name,
+          fileType: file.type || 'application/pdf',
+          size: file.size,
+          totalPages,
+          storageKey: uploadPrep.storageKey,
+          r2Key: uploadPrep.storageKey,
+          coverDataUrl,
+          coverUrl,
+          storageType: 'r2',
+        });
+        recordUploadedBook(book);
+      } else if (supabase && isSupabaseConfigured()) {
+        const bookId = uploadPrep?.bookId || `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
+        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const storageKey = uploadPrep?.storageKey || `books/${currentUserId}/${bookId}/${safeName}`;
+
+        console.log(`[Upload] Uploading ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) to Supabase Storage...`);
 
         const { error: uploadErr } = await supabase.storage
           .from('reedshelf-books')
@@ -180,10 +224,10 @@ export function Upload() {
         }
 
         const { data: publicUrlData } = supabase.storage.from('reedshelf-books').getPublicUrl(storageKey);
-        const coverUrl = publicUrlData?.publicUrl || null;
+        const coverUrl = publicUrlData?.publicUrl || `/api/books/${bookId}/file`;
 
         try {
-          // Send lightweight JSON (< 2 KB) to backend to register book & verify quota
+          // Record book metadata in Supabase PostgreSQL & local DB
           book = await api.books.recordBook({
             id: bookId,
             title,
@@ -193,12 +237,13 @@ export function Upload() {
             size: file.size,
             totalPages,
             storageKey,
+            r2Key: storageKey,
             coverDataUrl,
             coverUrl,
+            storageType: 'supabase',
           });
           recordUploadedBook(book);
         } catch (recordErr) {
-          // If server rejects (e.g. quota check failed), clean up cloud file
           try {
             await supabase.storage.from('reedshelf-books').remove([storageKey]);
           } catch {}
@@ -227,9 +272,9 @@ export function Upload() {
           }
         }
       } else {
-        // Fallback for environments without Supabase configured
+        // Fallback for environments without Cloudflare R2 or Supabase configured
         if (file.size > 4.5 * 1024 * 1024) {
-          throw new Error('This file exceeds 4.5 MB. Direct server upload on serverless platforms is limited to 4.5 MB. Please configure Supabase cloud storage.');
+          throw new Error('This file exceeds 4.5 MB. Direct server upload on serverless platforms is limited to 4.5 MB. Please configure Cloudflare R2 or Supabase cloud storage.');
         }
 
         try {
@@ -242,14 +287,14 @@ export function Upload() {
         } catch (backendErr) {
           console.error('Upload error:', backendErr);
 
-          // If session expired or unauthenticated, prompt user to sign in
           const isAuthError = backendErr.message && (
             backendErr.message.toLowerCase().includes('auth') ||
             backendErr.message.toLowerCase().includes('sign in') ||
             backendErr.message.includes('401')
           );
+
           if (isAuthError) {
-            throw new Error('Your session has expired. Please sign in again before uploading.');
+            throw new Error('Your session expired or you need to sign in again to upload books.');
           }
 
           const isNetworkOrOffline =

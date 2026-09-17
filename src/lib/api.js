@@ -209,6 +209,13 @@ export const api = {
       });
     },
 
+    async getUploadUrl({ fileName, fileSize, contentType } = {}) {
+      return await apiRequest('/api/books/upload-url', {
+        method: 'POST',
+        body: JSON.stringify({ fileName, fileSize, contentType }),
+      });
+    },
+
     async recordBook(data) {
       return await apiRequest('/api/books/record', {
         method: 'POST',
