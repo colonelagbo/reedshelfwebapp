@@ -206,8 +206,9 @@ export function Upload() {
           coverDataUrl,
           coverUrl,
           storageType: 'r2',
+          uploadedBy: currentUserId,
         });
-        recordUploadedBook(book);
+        recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
       } else if (supabase && isSupabaseConfigured()) {
         const bookId = uploadPrep?.bookId || `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
         const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
@@ -241,8 +242,9 @@ export function Upload() {
             coverDataUrl,
             coverUrl,
             storageType: 'supabase',
+            uploadedBy: currentUserId,
           });
-          recordUploadedBook(book);
+          recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
         } catch (recordErr) {
           try {
             await supabase.storage.from('reedshelf-books').remove([storageKey]);

@@ -163,8 +163,19 @@ export function Reader() {
         // ignore
       }
     }
-    // 3. React Router navigation
-    navigate('/app/library');
+    // 3. React Router navigation: prefer history back, fallback to /app/library
+    if (window.history.state && window.history.state.idx > 0) {
+      navigate(-1);
+    } else {
+      navigate('/app/library', { replace: true });
+    }
+
+    // 4. Fallback in case React Router's transition is stalled while fullscreen is exiting
+    setTimeout(() => {
+      if (window.location.pathname.includes('/reader/')) {
+        window.location.href = '/app/library';
+      }
+    }, 250);
   }, [user, bookId, currentPage, navigate]);
 
   const handlePauseTillTomorrow = () => {
@@ -631,13 +642,46 @@ export function Reader() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [totalPages, showHighlightsDrawer, isFullscreen, handleExitBook]);
 
+  // Synchronize fullscreen state with document changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
+
+  // Save progress and clean up on browser/mobile back button (popstate)
+  useEffect(() => {
+    const handlePopState = () => {
+      if (user?.id && bookId) {
+        try {
+          saveProgress(user.id, bookId, currentPage);
+        } catch (_err) {
+          // ignore save error on popstate
+        }
+      }
+      if (document.fullscreenElement) {
+        try {
+          document.exitFullscreen?.().catch(() => {});
+        } catch (_err) {
+          // ignore fullscreen error on popstate
+        }
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [user?.id, bookId, currentPage]);
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.();
-      setIsFullscreen(true);
+      document.documentElement.requestFullscreen?.().catch(() => {});
     } else {
-      document.exitFullscreen?.();
-      setIsFullscreen(false);
+      document.exitFullscreen?.().catch(() => {});
     }
   };
 
@@ -731,11 +775,11 @@ export function Reader() {
             type="button"
             onClick={handleExitBook}
             className="group flex h-9 sm:h-10 items-center gap-1.5 rounded-xl bg-[#009689] px-3 sm:px-3.5 text-xs sm:text-sm font-bold text-white shadow-xs transition hover:bg-[#007268] shrink-0 active:scale-95 cursor-pointer touch-manipulation border border-[#009689]"
-            title="Exit book and return to library (Escape)"
-            aria-label="Exit book"
+            title="Back to library (Escape)"
+            aria-label="Back to library"
           >
             <ArrowLeft size={18} className="transition-transform group-hover:-translate-x-0.5" />
-            <span>Exit</span>
+            <span>Back</span>
           </button>
 
           <div className="min-w-0 max-w-[110px] xs:max-w-[150px] sm:max-w-xs md:max-w-md">

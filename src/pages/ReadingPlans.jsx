@@ -61,12 +61,17 @@ export function ReadingPlans() {
       fetchPlans().then((p) => p && setPlans(p)).catch(() => {});
       fetchBooks().then((b) => {
         if (b && Array.isArray(b)) {
-          setBooks(b);
-          setSelectedBookId((curr) => curr || (b.length > 0 ? b[0].id : ''));
+          const isAdmin = user?.role === 'admin';
+          const userBooks = (user?.id && !isAdmin) ? b.filter((item) => {
+            const owner = item.uploadedBy || item.uploaded_by;
+            return !owner || owner === user.id || owner === 'demo_user';
+          }) : b;
+          setBooks(userBooks);
+          setSelectedBookId((curr) => curr || (userBooks.length > 0 ? userBooks[0].id : ''));
         }
       }).catch(() => {});
     }
-  }, [user?.id]);
+  }, [user?.id, user?.role]);
 
   const selectedBook = useMemo(
     () => books.find((b) => b.id === selectedBookId) || books[0],

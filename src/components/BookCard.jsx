@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { BookOpen, MoreHorizontal, Play, Trash2, CheckCircle2, Clock, Check } from 'lucide-react';
 
 export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete, view = 'grid' }) {
-  const cover = book.coverDataUrl || book.coverUrl;
+  const cover = book.coverDataUrl || (book.coverUrl && !book.coverUrl.endsWith('/file') ? book.coverUrl : null);
+  const [coverError, setCoverError] = useState(false);
+  const hasCover = cover && !coverError;
   const [menuOpen, setMenuOpen] = useState(false);
   const totalPages = book.totalPages || 0;
   const isFinished = progress >= 100;
@@ -24,10 +26,11 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
       <div className="pointer-events-none absolute inset-y-0 left-[3px] w-[1px] bg-white/20 z-20" />
       <div className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-black/10 dark:ring-white/10 z-20" />
 
-      {cover ? (
+      {hasCover ? (
         <img
           src={cover}
           alt={`${book.title} cover`}
+          onError={() => setCoverError(true)}
           className="h-full w-full object-cover transition-all duration-500 ease-out group-hover/cover:scale-105"
           loading="lazy"
         />
@@ -104,8 +107,8 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
       >
         <div className="relative h-24 w-16 sm:h-28 sm:w-20 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-[#ebe6d8] to-[#dfd9cb] shadow-sm dark:from-[#182629] dark:to-[#121e21]">
           <div className="pointer-events-none absolute inset-y-0 left-0 w-2.5 bg-gradient-to-r from-black/30 to-transparent z-10" />
-          {cover ? (
-            <img src={cover} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+          {hasCover ? (
+            <img src={cover} alt="" onError={() => setCoverError(true)} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
           ) : (
             <div className="grid h-full place-items-center bg-[#153a33] text-white">
               <BookOpen size={20} className="text-[#5fc4b8]" />
@@ -192,8 +195,8 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
       >
         <div className="relative h-14 w-10 sm:h-16 sm:w-11 shrink-0 overflow-hidden rounded-lg bg-gradient-to-br from-[#ebe6d8] to-[#dfd9cb] shadow-xs dark:from-[#182629] dark:to-[#121e21]">
           <div className="pointer-events-none absolute inset-y-0 left-0 w-1.5 bg-gradient-to-r from-black/25 to-transparent z-10" />
-          {cover ? (
-            <img src={cover} alt="" className="h-full w-full object-cover" />
+          {hasCover ? (
+            <img src={cover} alt="" onError={() => setCoverError(true)} className="h-full w-full object-cover" />
           ) : (
             <div className="grid h-full place-items-center bg-[#153a33] text-[#5fc4b8]">
               <BookOpen size={14} />

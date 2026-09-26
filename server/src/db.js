@@ -542,7 +542,10 @@ function queryFallback(sql, params, mode) {
         });
       } else if (lower.includes('into books')) {
         const [id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at] = params;
-        target.unshift({ id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at });
+        const existIdx = target.findIndex(b => b.id === id);
+        const bookObj = { id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at };
+        if (existIdx >= 0) target[existIdx] = { ...target[existIdx], ...bookObj };
+        else target.unshift(bookObj);
       } else if (lower.includes('into reading_plans')) {
         const [id, user_id, book_id, start_date, target_date, days, pages_per_day, total_pages, created_at, updated_at, plan_type, group_name, group_members] = params;
         target.unshift({

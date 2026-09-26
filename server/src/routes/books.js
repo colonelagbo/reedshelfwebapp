@@ -52,9 +52,23 @@ booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
     const isUserAdmin = req.user.role === 'admin';
     let usedBytes = 0;
     let totalBooks = 0;
-    let fromSupabase = false;
 
-    // 1. Fetch live storage usage from Supabase PostgreSQL if configured
+    // 1. Local database usage
+    const usageRow = db.get(
+      'SELECT COALESCE(SUM(file_size), 0) as totalBytes, COUNT(id) as totalBooks FROM books WHERE uploaded_by = ?',
+      [req.user.id]
+    );
+    usedBytes = Number(usageRow?.totalBytes || 0);
+    totalBooks = Number(usageRow?.totalBooks || 0);
+
+    // If admin has not yet uploaded books under their specific ID, count managed library books
+    if (isUserAdmin && totalBooks === 0) {
+      const allRow = db.get('SELECT COALESCE(SUM(file_size), 0) as totalBytes, COUNT(id) as totalBooks FROM books');
+      usedBytes = Number(allRow?.totalBytes || 0);
+      totalBooks = Number(allRow?.totalBooks || 0);
+    }
+
+    // 2. Cross-check Supabase PostgreSQL if configured
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -63,30 +77,13 @@ booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
           query = query.or(`uploaded_by.eq.${req.user.id},uploaded_by.eq.demo_user`);
         }
         const { data, error } = await query;
-        if (!error && Array.isArray(data)) {
-          usedBytes = data.reduce((sum, b) => sum + Number(b.file_size || 0), 0);
-          totalBooks = data.length;
-          fromSupabase = true;
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const sbUsedBytes = data.reduce((sum, b) => sum + Number(b.file_size || 0), 0);
+          usedBytes = Math.max(usedBytes, sbUsedBytes);
+          totalBooks = Math.max(totalBooks, data.length);
         }
       } catch (sbErr) {
-        // Fallback to local SQLite below
-      }
-    }
-
-    // 2. Fallback to local SQLite
-    if (!fromSupabase) {
-      const usageRow = db.get(
-        'SELECT COALESCE(SUM(file_size), 0) as totalBytes, COUNT(id) as totalBooks FROM books WHERE uploaded_by = ?',
-        [req.user.id]
-      );
-      usedBytes = Number(usageRow?.totalBytes || 0);
-      totalBooks = Number(usageRow?.totalBooks || 0);
-
-      // If admin has not yet uploaded books under their specific ID, count managed library books
-      if (isUserAdmin && totalBooks === 0) {
-        const allRow = db.get('SELECT COALESCE(SUM(file_size), 0) as totalBytes, COUNT(id) as totalBooks FROM books');
-        usedBytes = Number(allRow?.totalBytes || 0);
-        totalBooks = Number(allRow?.totalBooks || 0);
+        // Fallback to local database counts
       }
     }
 
@@ -128,13 +125,26 @@ booksRouter.get('/storage-config', optionalToken, async (req, res) => {
   }
 });
 
-// GET /api/books - Get user's books (synchronized with Supabase PostgreSQL and cached locally)
+// GET /api/books - Get user's books (synchronized with Supabase PostgreSQL and merged with local store)
 booksRouter.get('/', authenticateToken, async (req, res) => {
   try {
     const isUserAdmin = req.user.role === 'admin';
     const supabase = getSupabaseClient();
 
-    // 1. Fetch live books from Supabase PostgreSQL if configured
+    // 1. Fetch local books first (authoritative fallback that preserves all uploaded books)
+    const localBooks = isUserAdmin
+      ? db.all('SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books ORDER BY created_at DESC')
+      : db.all(
+          'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? OR uploaded_by = "demo_user" OR uploaded_by IS NULL ORDER BY created_at DESC',
+          [req.user.id]
+        );
+
+    const booksMap = new Map();
+    for (const b of localBooks) {
+      booksMap.set(b.id, formatBookRow(b));
+    }
+
+    // 2. Fetch live books from Supabase PostgreSQL if configured and merge
     if (supabase) {
       try {
         let query = supabase.from('books').select('*').order('created_at', { ascending: false });
@@ -142,8 +152,7 @@ booksRouter.get('/', authenticateToken, async (req, res) => {
           query = query.or(`uploaded_by.eq.${req.user.id},uploaded_by.eq.demo_user`);
         }
         const { data, error } = await query;
-        if (!error && Array.isArray(data)) {
-          // Sync into local SQLite database for fast offline fallback
+        if (!error && Array.isArray(data) && data.length > 0) {
           for (const b of data) {
             try {
               db.run(
@@ -153,24 +162,18 @@ booksRouter.get('/', authenticateToken, async (req, res) => {
                 [b.id, b.title, b.author, b.file_name, b.file_type || 'application/pdf', b.file_size || 0, b.total_pages || 0, b.uploaded_by, b.r2_key, b.cover_data_url || null, b.cover_url || null, b.created_at]
               );
             } catch {}
+            booksMap.set(b.id, formatBookRow(b));
           }
-          return res.json(data.map(formatBookRow));
         }
       } catch (sbErr) {
         console.warn('[Supabase Books Fetch Notice]:', sbErr.message);
       }
     }
 
-    // 2. Fallback to local SQLite database
-    const localBooks = isUserAdmin
-      ? db.all('SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books ORDER BY created_at DESC')
-      : db.all(
-          'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? OR uploaded_by = "demo_user" OR uploaded_by IS NULL ORDER BY created_at DESC',
-          [req.user.id]
-        );
-
-    const formatted = localBooks.map(formatBookRow);
-    res.json(formatted);
+    const merged = Array.from(booksMap.values()).sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+    res.json(merged);
   } catch (err) {
     console.error('Error fetching books:', err);
     res.status(500).json({ error: 'Failed to retrieve books.' });

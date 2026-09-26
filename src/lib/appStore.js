@@ -217,18 +217,42 @@ export async function fetchStorageUsage() {
   return getUserStorageUsage(user?.id);
 }
 
+const DELETED_BOOKS_KEY = 'reedshelf_deleted_books_v1';
+export function getDeletedBookIds() {
+  return read(DELETED_BOOKS_KEY, []);
+}
+
 export async function fetchBooks() {
   const localBooks = getBooks();
   const user = getCurrentUser();
+  const deletedSet = new Set(getDeletedBookIds());
+
+  const mergeBooks = (primary, secondary) => {
+    const map = new Map();
+    if (Array.isArray(secondary)) {
+      for (const b of secondary) {
+        if (b && b.id && !deletedSet.has(b.id)) map.set(b.id, b);
+      }
+    }
+    if (Array.isArray(primary)) {
+      for (const b of primary) {
+        if (b && b.id && !deletedSet.has(b.id)) map.set(b.id, b);
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+    );
+  };
 
   // 1. Try fetching from Backend API
   try {
     const books = await api.books.list();
     if (Array.isArray(books)) {
-      // Authoritative cloud sync: update local cache to match server exactly
-      write(BOOKS_KEY, books);
+      // Authoritative cloud sync merged with local cache to prevent wiping out newly uploaded or local books
+      const merged = mergeBooks(books, localBooks);
+      write(BOOKS_KEY, merged);
       notifyBooksChanged();
-      return books;
+      return merged;
     }
   } catch (err) {
     console.warn('Could not fetch books from backend API, checking Supabase direct:', err.message);
@@ -240,7 +264,7 @@ export async function fetchBooks() {
       if (user?.id) {
         let query = supabase.from('books').select('*');
         if (user.role !== 'admin') {
-          query = query.eq('uploaded_by', user.id);
+          query = query.or(`uploaded_by.eq.${user.id},uploaded_by.eq.demo_user`);
         }
         const { data, error } = await query.order('created_at', { ascending: false });
 
@@ -259,9 +283,10 @@ export async function fetchBooks() {
             coverUrl: b.cover_url,
             createdAt: b.created_at,
           }));
-          write(BOOKS_KEY, formatted);
+          const merged = mergeBooks(formatted, localBooks);
+          write(BOOKS_KEY, merged);
           notifyBooksChanged();
-          return formatted;
+          return merged;
         }
       }
     } catch (sbErr) {
@@ -285,18 +310,42 @@ export async function uploadBookFile(file, metadata) {
 export const uploadBookFileToCloudflare = uploadBookFile;
 
 export function addBook(book) {
-  const item = { id: uid('book'), ...book, createdAt: new Date().toISOString() };
-  write(BOOKS_KEY, [item, ...getBooks()]);
+  const user = getCurrentUser();
+  const bookId = book.id || uid('book');
+  const deleted = getDeletedBookIds();
+  if (deleted.includes(bookId)) {
+    write(DELETED_BOOKS_KEY, deleted.filter((d) => d !== bookId));
+  }
+  const item = {
+    id: bookId,
+    ...book,
+    uploadedBy: book.uploadedBy || book.uploaded_by || user?.id || 'demo_user',
+    totalPages: Number(book.totalPages || book.total_pages || 0),
+    size: Number(book.size || book.file_size || 0),
+    createdAt: book.createdAt || new Date().toISOString(),
+  };
+  write(BOOKS_KEY, [item, ...getBooks().filter((b) => b.id !== bookId)]);
   notifyBooksChanged();
   return item;
 }
 
 export function recordUploadedBook(book) {
   if (!book || !book.id) return book;
+  const user = getCurrentUser();
+  const deleted = getDeletedBookIds();
+  if (deleted.includes(book.id)) {
+    write(DELETED_BOOKS_KEY, deleted.filter((d) => d !== book.id));
+  }
+  const normalized = {
+    ...book,
+    uploadedBy: book.uploadedBy || book.uploaded_by || user?.id || 'demo_user',
+    totalPages: Number(book.totalPages || book.total_pages || 0),
+    size: Number(book.size || book.file_size || 0),
+  };
   const current = getBooks();
-  write(BOOKS_KEY, [book, ...current.filter((b) => b.id !== book.id)]);
+  write(BOOKS_KEY, [normalized, ...current.filter((b) => b.id !== normalized.id)]);
   notifyBooksChanged();
-  return book;
+  return normalized;
 }
 
 export async function updateBook(id, changes) {
@@ -313,6 +362,9 @@ export async function updateBook(id, changes) {
 }
 
 export async function deleteBook(id) {
+  const deleted = getDeletedBookIds();
+  write(DELETED_BOOKS_KEY, [...new Set([...deleted, id])]);
+
   try {
     await api.books.delete(id);
   } catch (err) {
