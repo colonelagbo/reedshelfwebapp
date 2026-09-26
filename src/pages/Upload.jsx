@@ -246,7 +246,9 @@ export function Upload() {
         } catch (recordErr) {
           try {
             await supabase.storage.from('reedshelf-books').remove([storageKey]);
-          } catch {}
+          } catch {
+            // ignore storage rollback error
+          }
 
           const isNetworkOrOffline =
             recordErr.message?.includes('Failed to fetch') ||

@@ -267,9 +267,4 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_auth_user();
 
--- Seed initial records
-INSERT INTO public.users (id, name, email, role, status, created_at)
-VALUES 
-  ('admin_usr_link4emmy', 'Platform Admin', 'link4emmy@gmail.com', 'admin', 'active', NOW()),
-  ('demo_user', 'Demo Reader', 'demo@reedshelf.app', 'user', 'active', NOW())
-ON CONFLICT (id) DO NOTHING;
+

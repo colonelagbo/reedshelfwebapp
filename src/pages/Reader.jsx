@@ -122,6 +122,9 @@ export function Reader() {
   const canvasRef = useRef(null);
   const textLayerRef = useRef(null);
   const renderTaskRef = useRef(null);
+  const textLayerTaskRef = useRef(null);
+  const renderIdRef = useRef(0);
+  const activeScaleRef = useRef(1.0);
   const lastTapRef = useRef({ time: 0, x: 0, y: 0 });
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
   const fileInputRef = useRef(null);
@@ -162,12 +165,6 @@ export function Reader() {
     }
     // 3. React Router navigation
     navigate('/app/library');
-    // 4. Guaranteed fallback navigation if router transition is interrupted
-    setTimeout(() => {
-      if (window.location.pathname.includes('/reader/')) {
-        window.location.href = '/app/library';
-      }
-    }, 150);
   }, [user, bookId, currentPage, navigate]);
 
   const handlePauseTillTomorrow = () => {
@@ -236,6 +233,14 @@ export function Reader() {
       setPdfDoc(doc);
       setTotalPages(doc.numPages);
 
+      // Ensure valid currentPage bounds
+      setCurrentPage((prev) => {
+        const p = Number(prev) || 1;
+        if (p < 1) return 1;
+        if (p > doc.numPages) return 1;
+        return p;
+      });
+
       const currentBook = getBooks().find((b) => b.id === bookId);
       if (currentBook && (!currentBook.totalPages || currentBook.totalPages !== doc.numPages)) {
         updateBook(bookId, { totalPages: doc.numPages });
@@ -278,21 +283,39 @@ export function Reader() {
     }
   }, [currentPage, user, bookId, loading]);
 
-  // 3. Render current page on canvas + TextLayer with perfect screen display fit
+  // 3. Render current page on canvas + TextLayer with perfect screen display fit & zero-glitch double-buffering
   const renderPage = useCallback(async () => {
     if (!pdfDoc || !canvasRef.current) return;
 
+    const currentRenderId = ++renderIdRef.current;
+
+    // Safely cancel and await settlement of any in-flight canvas render
     if (renderTaskRef.current) {
       try {
         renderTaskRef.current.cancel();
+        await renderTaskRef.current.promise;
       } catch {
-        // ignore cancellation
+        // RenderingCancelledException is expected
       }
       renderTaskRef.current = null;
     }
 
+    // Cancel in-flight text layer render
+    if (textLayerTaskRef.current) {
+      try {
+        textLayerTaskRef.current.cancel();
+      } catch {
+        // ignore cancellation
+      }
+      textLayerTaskRef.current = null;
+    }
+
+    if (currentRenderId !== renderIdRef.current) return;
+
     try {
       const page = await pdfDoc.getPage(currentPage);
+      if (currentRenderId !== renderIdRef.current) return;
+
       const container = containerRef.current;
       
       // Calculate available container dimensions
@@ -310,8 +333,12 @@ export function Reader() {
       const availableWidth = Math.max(160, containerWidth - padX * 2);
       const availableHeight = Math.max(160, containerHeight - padY * 2);
 
-      const scaleW = availableWidth / unscaledViewport.width;
-      const scaleH = availableHeight / unscaledViewport.height;
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+
+      let scaleW = availableWidth / (unscaledViewport.width || 1);
+      let scaleH = availableHeight / (unscaledViewport.height || 1);
+      if (!Number.isFinite(scaleW) || scaleW <= 0) scaleW = 1.0;
+      if (!Number.isFinite(scaleH) || scaleH <= 0) scaleH = 1.0;
 
       let currentScale = scale;
       if (fitMode === 'page' || fitMode === 'fit') {
@@ -323,27 +350,46 @@ export function Reader() {
         currentScale = scaleH;
       }
 
+      if (!Number.isFinite(currentScale) || currentScale <= 0) {
+        currentScale = 1.0;
+      }
+      activeScaleRef.current = currentScale;
+
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2.5);
       const viewport = page.getViewport({ scale: currentScale });
 
-      const canvas = canvasRef.current;
-      const ctx = canvas.getContext('2d', { alpha: false });
+      // Double-buffering: render to offscreen canvas first to prevent white/black flash & flickering
+      const targetWidth = Math.floor(viewport.width * pixelRatio);
+      const targetHeight = Math.floor(viewport.height * pixelRatio);
 
-      canvas.width = Math.floor(viewport.width * pixelRatio);
-      canvas.height = Math.floor(viewport.height * pixelRatio);
-      canvas.style.width = `${Math.floor(viewport.width)}px`;
-      canvas.style.height = `${Math.floor(viewport.height)}px`;
-
-      ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      const offscreenCanvas = document.createElement('canvas');
+      offscreenCanvas.width = targetWidth;
+      offscreenCanvas.height = targetHeight;
+      const offCtx = offscreenCanvas.getContext('2d', { alpha: false });
+      offCtx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
 
       const renderContext = {
-        canvasContext: ctx,
+        canvasContext: offCtx,
         viewport: viewport,
       };
 
       const renderTask = page.render(renderContext);
       renderTaskRef.current = renderTask;
       await renderTask.promise;
+
+      if (currentRenderId !== renderIdRef.current) return;
+
+      // Copy rendered page smoothly to the visible canvas in a single instant frame
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.style.height = `${Math.floor(viewport.height)}px`;
+
+      const ctx = canvas.getContext('2d', { alpha: false });
+      ctx.drawImage(offscreenCanvas, 0, 0);
 
       // Render Text Layer for text selection & highlighting
       if (textLayerRef.current) {
@@ -352,29 +398,42 @@ export function Reader() {
           textLayerDiv.innerHTML = '';
           textLayerDiv.style.width = `${Math.floor(viewport.width)}px`;
           textLayerDiv.style.height = `${Math.floor(viewport.height)}px`;
+          textLayerDiv.style.setProperty('--total-scale-factor', `${viewport.scale}`);
+          textLayerDiv.style.setProperty('--scale-factor', `${viewport.scale}`);
 
           const textContent = await page.getTextContent();
+          if (currentRenderId !== renderIdRef.current) return;
+
           const textLayer = new pdfjsLib.TextLayer({
             textContentSource: textContent,
             container: textLayerDiv,
             viewport: viewport,
           });
 
+          textLayerTaskRef.current = textLayer;
           await textLayer.render();
         } catch (textErr) {
-          console.warn('Text layer render notice:', textErr);
+          if (textErr?.name !== 'RenderingCancelledException') {
+            console.warn('Text layer render notice:', textErr);
+          }
         }
       }
     } catch (err) {
       if (err?.name !== 'RenderingCancelledException') {
         console.error('Page render error:', err);
       }
+    } finally {
+      if (currentRenderId === renderIdRef.current) {
+        renderTaskRef.current = null;
+      }
     }
   }, [pdfDoc, currentPage, scale, fitMode]);
 
   useEffect(() => {
-    renderPage();
-  }, [renderPage]);
+    if (!loading && pdfDoc) {
+      renderPage();
+    }
+  }, [loading, pdfDoc, renderPage]);
 
   // Trigger swipe reminder when book is opened
   useEffect(() => {
@@ -390,16 +449,21 @@ export function Reader() {
     }
   }, [loading, pdfDoc, totalPages]);
 
-  // Window resize & orientation change handler
+  // Window resize & orientation change handler with debounce
   useEffect(() => {
+    let timer = null;
     const handleResize = () => {
       if (fitMode !== 'custom') {
-        renderPage();
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          renderPage();
+        }, 120);
       }
     };
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleResize);
     return () => {
+      if (timer) clearTimeout(timer);
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('orientationchange', handleResize);
     };
@@ -408,14 +472,25 @@ export function Reader() {
   // ResizeObserver to ensure container settling always fits book perfectly
   useEffect(() => {
     if (!containerRef.current) return;
-    const observer = new ResizeObserver(() => {
-      if (fitMode !== 'custom' && pdfDoc) {
-        renderPage();
+    let timer = null;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry && (entry.contentRect.width === 0 || entry.contentRect.height === 0)) {
+        return;
+      }
+      if (fitMode !== 'custom' && pdfDoc && !loading) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          renderPage();
+        }, 120);
       }
     });
     observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [fitMode, pdfDoc, renderPage]);
+    return () => {
+      if (timer) clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [fitMode, pdfDoc, loading, renderPage]);
 
   // 4. Text Highlighting & Double Tap / Double Click handlers
   const createHighlight = useCallback(
@@ -544,11 +619,11 @@ export function Reader() {
           handleExitBook();
         }
       } else if (e.key === '+' || e.key === '=') {
-        setScale((s) => Math.min(3.0, s + 0.15));
         setFitMode('custom');
+        setScale((s) => Number((Math.min(3.0, (activeScaleRef.current || s || 1.0) + 0.15)).toFixed(2)));
       } else if (e.key === '-' || e.key === '_') {
-        setScale((s) => Math.max(0.5, s - 0.15));
         setFitMode('custom');
+        setScale((s) => Number((Math.max(0.4, (activeScaleRef.current || s || 1.0) - 0.15)).toFixed(2)));
       }
     };
 
@@ -834,18 +909,16 @@ export function Reader() {
           ref={containerRef}
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
-          className={`relative flex flex-1 items-center justify-center p-0 sm:p-1 select-none ${
-            fitMode === 'custom' ? 'overflow-auto' : 'overflow-hidden'
-          }`}
+          className="relative flex flex-1 overflow-auto p-0 sm:p-1 select-none"
         >
           {loading ? (
-            <div className="my-auto flex flex-col items-center justify-center py-20 text-center">
+            <div className="m-auto flex flex-col items-center justify-center py-20 text-center">
               <Loader2 className="h-10 w-10 animate-spin text-[#009689]" />
               <p className="mt-4 text-sm font-semibold">Opening book pages...</p>
               <p className="mt-1 text-xs opacity-60">Preparing razor-sharp text view ({loadProgress}%)</p>
             </div>
           ) : loadError ? (
-            <div className="my-auto max-w-md rounded-3xl border border-red-500/20 bg-red-950/40 p-6 text-center text-red-200 shadow-2xl backdrop-blur">
+            <div className="m-auto max-w-md rounded-3xl border border-red-500/20 bg-red-950/40 p-6 text-center text-red-200 shadow-2xl backdrop-blur">
               <BookOpen size={40} className="mx-auto mb-3 text-red-400" />
               <p className="text-base font-bold">Unable to display PDF</p>
               <p className="mt-2 text-xs opacity-80">{loadError}</p>
@@ -877,7 +950,7 @@ export function Reader() {
             </div>
           ) : (
             <div
-              className="group/page relative mx-auto my-auto flex items-center justify-center rounded-lg bg-white transition-all shadow-2xl overflow-hidden"
+              className="group/page relative m-auto flex items-center justify-center rounded-lg bg-white transition-all shadow-2xl overflow-hidden"
               style={{
                 boxShadow: themeConfig.pageShadow,
                 filter: themeConfig.pageFilter,

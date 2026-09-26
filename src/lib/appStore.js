@@ -740,8 +740,24 @@ export async function getBookFile(bookId) {
       req.onerror = () => reject(req.error);
     });
     if (result) {
-      memoryFileCache.set(bookId, result);
-      return cloneFileData(result);
+      let isPdf = true;
+      try {
+        let bytes;
+        if (result instanceof ArrayBuffer) bytes = new Uint8Array(result.slice(0, 5));
+        else if (result instanceof Uint8Array) bytes = result.slice(0, 5);
+        if (bytes && bytes.length >= 4) {
+          isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+        }
+      } catch {
+        isPdf = true;
+      }
+      if (isPdf) {
+        memoryFileCache.set(bookId, result);
+        return cloneFileData(result);
+      } else {
+        console.warn(`Cached file for book ${bookId} is not a valid PDF. Clearing cache.`);
+        deleteBookFile(bookId).catch(() => {});
+      }
     }
   } catch (err) {
     console.warn('Notice reading file from IndexedDB:', err);
@@ -752,16 +768,23 @@ export async function getBookFile(bookId) {
   const b = all.find((x) => x.id === bookId);
   const storageKey = b?.r2Key || b?.r2_key;
 
-  // 3a. If book has a direct public CDN URL
-  if (b?.coverUrl && b.coverUrl.startsWith('http')) {
+  // 3a. If book has a direct public CDN URL (validate it is a PDF and not an image cover)
+  if (b?.coverUrl && b.coverUrl.startsWith('http') && !b.coverUrl.match(/\.(jpe?g|png|webp|gif|svg)($|\?)/i)) {
     try {
       const resp = await fetch(b.coverUrl);
       if (resp.ok) {
-        const ab = await resp.arrayBuffer();
-        if (ab && ab.byteLength > 0) {
-          memoryFileCache.set(bookId, ab);
-          saveBookFile(bookId, ab).catch(() => {});
-          return cloneFileData(ab);
+        const cType = resp.headers.get('content-type') || '';
+        if (!cType.includes('image/')) {
+          const ab = await resp.arrayBuffer();
+          if (ab && ab.byteLength > 4) {
+            const header = new Uint8Array(ab.slice(0, 5));
+            const isPdf = header[0] === 0x25 && header[1] === 0x50 && header[2] === 0x44 && header[3] === 0x46;
+            if (isPdf) {
+              memoryFileCache.set(bookId, ab);
+              saveBookFile(bookId, ab).catch(() => {});
+              return cloneFileData(ab);
+            }
+          }
         }
       }
     } catch (urlErr) {
