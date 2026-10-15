@@ -39,6 +39,24 @@
         } catch (e) {}
       })();
     </script>
+    <script>
+      window.addEventListener('error', function (e) {
+        var msg = (e && e.message) || '';
+        if (msg.indexOf('Failed to fetch dynamically imported module') !== -1 ||
+            msg.indexOf('Importing a module script failed') !== -1 ||
+            msg.indexOf('Loading chunk') !== -1) {
+          if (!sessionStorage.getItem('reedshelf_auto_recovered')) {
+            sessionStorage.setItem('reedshelf_auto_recovered', '1');
+            window.location.reload();
+          }
+        }
+      });
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          sessionStorage.removeItem('reedshelf_auto_recovered');
+        }, 5000);
+      });
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
