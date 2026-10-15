@@ -41,8 +41,19 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
   const isStarted = progress > 0 && !isFinished;
 
   const user = getCurrentUser();
-  const plans = user?.id ? getUserPlans(user.id) : [];
-  const bookPlan = plans.find((p) => p.bookId === book.id);
+  const [plans, setPlans] = useState(() => (user?.id ? getUserPlans(user.id) : []));
+
+  useEffect(() => {
+    const handlePlansUpdated = () => {
+      if (user?.id) {
+        setPlans(getUserPlans(user.id));
+      }
+    };
+    window.addEventListener('reedshelf:plans_updated', handlePlansUpdated);
+    return () => window.removeEventListener('reedshelf:plans_updated', handlePlansUpdated);
+  }, [user?.id]);
+
+  const bookPlan = plans.find((p) => (p.bookId || p.book_id) === book.id);
 
   const handleDeleteClick = (e) => {
     e.stopPropagation();
@@ -363,7 +374,7 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
               {totalPages > 0 && isStarted ? `p. ${currentPage} of ${totalPages}` : isFinished ? 'Completed' : 'Progress'}
               {bookPlan && (
                 <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#007268] dark:text-[#5fc4b8]">
-                  • {bookPlan.pagesPerDay}p/day
+                  • {bookPlan.pagesPerDay || bookPlan.pages_per_day}p/day
                 </span>
               )}
             </span>

@@ -33,7 +33,11 @@ export function Dashboard() {
 
     loadData();
     window.addEventListener('reedshelf:books_updated', loadData);
-    return () => window.removeEventListener('reedshelf:books_updated', loadData);
+    window.addEventListener('reedshelf:plans_updated', loadData);
+    return () => {
+      window.removeEventListener('reedshelf:books_updated', loadData);
+      window.removeEventListener('reedshelf:plans_updated', loadData);
+    };
   }, [user?.id, user?.role]);
 
   const progress = (b) => {

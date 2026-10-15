@@ -370,8 +370,9 @@ export async function syncPlansFromCloud(force = false) {
  */
 export async function recordPlanInCloud(plan) {
   try {
-    const cloudPlans = (await supabaseStorage.getMetadata('plans.json')) || [];
-    const filtered = cloudPlans.filter((p) => p.id !== plan.id);
+    const targetUserId = plan.userId || plan.user_id;
+    const targetBookId = plan.bookId || plan.book_id;
+    const filtered = cloudPlans.filter((p) => p.id !== plan.id && !(p.user_id === targetUserId && p.book_id === targetBookId));
     filtered.unshift({
       id: plan.id,
       user_id: plan.userId || plan.user_id,

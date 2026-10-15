@@ -18,7 +18,8 @@ import {
   User,
   Users,
   AtSign,
-  UserPlus
+  UserPlus,
+  AlertCircle
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import {
@@ -57,6 +58,8 @@ export function ReadingPlans() {
   const [members, setMembers] = useState([]);
   const [userSuggestions, setUserSuggestions] = useState([]);
   const [filterPlanTab, setFilterPlanTab] = useState('all'); // 'all' | 'individual' | 'group'
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState('');
 
   useEffect(() => {
     if (bookIdParam) {
@@ -67,7 +70,14 @@ export function ReadingPlans() {
 
   useEffect(() => {
     if (user?.id) {
-      fetchPlans().then((p) => p && setPlans(p)).catch(() => {});
+      const loadPlans = () => {
+        fetchPlans().then((p) => {
+          if (p && Array.isArray(p)) setPlans(p);
+        }).catch(() => {});
+      };
+
+      loadPlans();
+
       fetchBooks().then((b) => {
         if (b && Array.isArray(b)) {
           const isAdmin = user?.role === 'admin';
@@ -79,6 +89,9 @@ export function ReadingPlans() {
           setSelectedBookId((curr) => curr || bookIdParam || (userBooks.length > 0 ? userBooks[0].id : ''));
         }
       }).catch(() => {});
+
+      window.addEventListener('reedshelf:plans_updated', loadPlans);
+      return () => window.removeEventListener('reedshelf:plans_updated', loadPlans);
     }
   }, [user?.id, user?.role, bookIdParam]);
 
@@ -203,29 +216,67 @@ export function ReadingPlans() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedBook?.id || !user?.id) return;
+    if (!books.length) {
+      setFormError('Please upload a book first before creating a reading plan.');
+      return;
+    }
+    const currentBook = selectedBook || books.find((b) => b.id === selectedBookId) || books[0];
+    if (!currentBook?.id) {
+      setFormError('Please select a book to set a reading plan.');
+      return;
+    }
+    if (!user?.id) {
+      setFormError('You must be signed in to create a reading plan.');
+      return;
+    }
 
     try {
+      setSubmitting(true);
+      setFormError('');
+
       const isGroup = planType === 'group';
       const cleanGroupName = isGroup
         ? (groupName.trim() || `${user?.name || 'Reader'}'s Book Club`)
         : '';
 
       const newPlan = await addPlan({
-        bookId: selectedBook.id,
+        bookId: currentBook.id,
         userId: user.id,
         startDate,
         targetDate,
         days: numDays,
         pagesPerDay,
-        totalPages,
+        totalPages: currentBook.totalPages || totalPages || 100,
         planType: isGroup ? 'group' : 'individual',
         groupName: cleanGroupName,
         members: isGroup ? members : [],
       });
 
-      setPlans([newPlan, ...plans]);
+      const normalizedPlan = {
+        ...newPlan,
+        id: newPlan?.id || `plan_${Date.now()}`,
+        bookId: newPlan?.bookId || newPlan?.book_id || currentBook.id,
+        userId: newPlan?.userId || newPlan?.user_id || user.id,
+        startDate: newPlan?.startDate || newPlan?.start_date || startDate,
+        targetDate: newPlan?.targetDate || newPlan?.target_date || targetDate,
+        days: newPlan?.days || numDays,
+        pagesPerDay: newPlan?.pagesPerDay || newPlan?.pages_per_day || pagesPerDay,
+        totalPages: newPlan?.totalPages || newPlan?.total_pages || (currentBook.totalPages || totalPages || 100),
+        planType: newPlan?.planType || newPlan?.plan_type || (isGroup ? 'group' : 'individual'),
+        groupName: newPlan?.groupName || newPlan?.group_name || cleanGroupName,
+        members: Array.isArray(newPlan?.members) ? newPlan.members : (isGroup ? members : []),
+      };
+
+      setPlans((prev) => [
+        normalizedPlan,
+        ...prev.filter(
+          (p) => p.id !== normalizedPlan.id && !((p.bookId || p.book_id) === currentBook.id && (p.userId || p.user_id) === user.id)
+        ),
+      ]);
+
+      window.dispatchEvent(new CustomEvent('reedshelf:plans_updated'));
       setOpen(false);
+
       // Reset form state
       setPlanType('individual');
       setGroupName('');
@@ -234,13 +285,17 @@ export function ReadingPlans() {
       setUserSuggestions([]);
     } catch (err) {
       console.error('Error adding plan:', err);
+      setFormError(err.message || 'There was a problem creating the reading plan. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleRemove = async (id) => {
     if (window.confirm('Delete this reading plan?')) {
       await deletePlan(id);
-      setPlans(plans.filter((p) => p.id !== id));
+      setPlans((prev) => prev.filter((p) => p.id !== id));
+      window.dispatchEvent(new CustomEvent('reedshelf:plans_updated'));
     }
   };
 
@@ -292,6 +347,12 @@ export function ReadingPlans() {
             </div>
 
             <form onSubmit={handleSubmit} className="mt-5 space-y-5 sm:mt-7 sm:space-y-6">
+              {formError && (
+                <div className="flex items-center gap-2 rounded-xl bg-red-50 p-3.5 text-xs sm:text-sm font-semibold text-red-700 border border-red-200 dark:bg-red-950/40 dark:border-red-900/40 dark:text-red-300">
+                  <AlertCircle size={18} className="shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
               {/* Plan Type Selector */}
               <div>
                 <label className="mb-2 block text-xs sm:text-sm font-semibold">Choose Plan Type</label>
@@ -443,7 +504,7 @@ export function ReadingPlans() {
                 <label className="mb-2 block text-xs sm:text-sm font-semibold">1. Select a Book</label>
                 <select
                   required
-                  value={selectedBookId}
+                  value={selectedBook?.id || selectedBookId || ''}
                   onChange={(e) => setSelectedBookId(e.target.value)}
                   className="w-full rounded-xl border border-[#d5ddd1] bg-[#fbfcf9] px-3.5 py-2.5 text-xs sm:text-sm font-medium outline-none focus:border-[#007268] dark:border-white/10 dark:bg-white/5"
                 >
@@ -617,9 +678,19 @@ export function ReadingPlans() {
                 </button>
                 <button
                   type="submit"
-                  className="inline-flex min-h-[44px] justify-center items-center gap-2 rounded-xl bg-[#009689] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] touch-manipulation"
+                  disabled={submitting}
+                  className="inline-flex min-h-[44px] justify-center items-center gap-2 rounded-xl bg-[#009689] px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#007268] disabled:opacity-50 touch-manipulation cursor-pointer"
                 >
-                  <CheckCircle2 size={18} /> Save Reading Plan
+                  {submitting ? (
+                    <>
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      <span>Saving Plan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={18} /> Save Reading Plan
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -688,15 +759,18 @@ export function ReadingPlans() {
                   return true;
                 })
                 .map((plan) => {
+                const book = books.find((b) => b.id === (plan.bookId || plan.book_id));
                 const isPdfUrl = (url) => typeof url === 'string' && (url.toLowerCase().endsWith('.pdf') || url.endsWith('/file') || url.includes('/file?'));
                 const cover = book?.coverDataUrl || (book?.coverUrl && !isPdfUrl(book.coverUrl) ? book.coverUrl : (book?.id ? `/api/books/${book.id}/cover` : null));
-                const currentPage = book ? getProgress(user.id, book.id).page : 1;
-                const total = book?.totalPages || plan.totalPages || 1;
+                const currentPage = book ? getProgress(user?.id, book.id).page : 1;
+                const total = book?.totalPages || plan.totalPages || plan.total_pages || 1;
                 const pct = Math.min(100, Math.round((currentPage / total) * 100));
+                const planPagesPerDay = plan.pagesPerDay || plan.pages_per_day || 1;
                 const remainingPages = Math.max(0, total - currentPage);
-                const daysLeft = Math.ceil(remainingPages / (plan.pagesPerDay || 1));
-                const isGroup = plan.planType === 'group';
+                const daysLeft = Math.ceil(remainingPages / (planPagesPerDay || 1));
+                const isGroup = (plan.planType || plan.plan_type) === 'group';
                 const planMembers = Array.isArray(plan.members) ? plan.members : [];
+                const targetDateVal = plan.targetDate || plan.target_date;
 
                 return (
                   <div
@@ -752,10 +826,10 @@ export function ReadingPlans() {
 
                           <div className="mt-2.5 sm:mt-3 flex flex-wrap items-center gap-1.5 sm:gap-2">
                             <span className="inline-flex items-center gap-1 rounded-lg bg-[#e6f4f2] px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
-                              <Target size={12} /> {plan.pagesPerDay} pages/day
+                              <Target size={12} /> {planPagesPerDay} pages/day
                             </span>
                             <span className="inline-flex items-center gap-1 rounded-lg bg-[#f0eee6] px-2 py-0.5 sm:px-2.5 sm:py-1 text-[11px] sm:text-xs font-medium text-[#5c6863] dark:bg-white/10 dark:text-white/70">
-                              <CalendarDays size={12} /> Finish by {new Date(`${plan.targetDate}T12:00:00`).toLocaleDateString()}
+                              <CalendarDays size={12} /> Finish by {targetDateVal ? new Date(`${targetDateVal}T12:00:00`).toLocaleDateString() : 'Target'}
                             </span>
                           </div>
                         </div>
@@ -769,7 +843,7 @@ export function ReadingPlans() {
                               <Users size={12} /> Members ({planMembers.length + 1})
                             </span>
                             <span className="text-[10px] text-purple-600 dark:text-purple-400">
-                              {plan.userId === user?.id ? 'You are Host' : 'Joined Group'}
+                              {(plan.userId || plan.user_id) === user?.id ? 'You are Host' : 'Joined Group'}
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1">

@@ -88,9 +88,11 @@ export function Profile() {
       }
     };
     window.addEventListener('reedshelf:books_updated', refresh);
+    window.addEventListener('reedshelf:plans_updated', refresh);
     window.addEventListener('reedshelf:user_updated', handleUserUpdate);
     return () => {
       window.removeEventListener('reedshelf:books_updated', refresh);
+      window.removeEventListener('reedshelf:plans_updated', refresh);
       window.removeEventListener('reedshelf:user_updated', handleUserUpdate);
     };
   }, [user?.id, user?.role]);

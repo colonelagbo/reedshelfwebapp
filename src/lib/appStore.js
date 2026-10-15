@@ -487,33 +487,65 @@ export const getPlans = () => read(PLANS_KEY, []);
 
 export const getUserPlans = (userId) => {
   const user = getCurrentUser();
+  const currentUserId = userId || user?.id;
   const userName = (user?.name || '').toLowerCase();
   const userClean = userName.replace(/\s+/g, '');
   const userEmail = (user?.email || '').toLowerCase();
 
-  return getPlans().filter((p) => {
-    if (p.userId === userId) return true;
-    if (p.planType === 'group' && Array.isArray(p.members)) {
-      return p.members.some((m) => {
-        const memStr = (typeof m === 'string' ? m : (m.username || m.name || m.email || '')).toLowerCase();
-        const memClean = memStr.replace(/[@\s]/g, '');
-        return (
-          memStr === userName ||
-          memClean === userClean ||
-          memStr === userEmail ||
-          (m.id && m.id === userId)
-        );
-      });
-    }
-    return false;
-  });
+  return getPlans()
+    .filter((p) => {
+      const pUserId = p.userId || p.user_id;
+      if (pUserId === currentUserId) return true;
+      const pType = p.planType || p.plan_type;
+      const pMembers = p.members || (typeof p.group_members === 'string' ? JSON.parse(p.group_members || '[]') : p.group_members);
+      if (pType === 'group' && Array.isArray(pMembers)) {
+        return pMembers.some((m) => {
+          const memStr = (typeof m === 'string' ? m : (m.username || m.name || m.email || '')).toLowerCase();
+          const memClean = memStr.replace(/[@\s]/g, '');
+          return (
+            memStr === userName ||
+            memClean === userClean ||
+            memStr === userEmail ||
+            (m.id && m.id === currentUserId)
+          );
+        });
+      }
+      return false;
+    })
+    .map((p) => ({
+      ...p,
+      bookId: p.bookId || p.book_id,
+      userId: p.userId || p.user_id,
+      startDate: p.startDate || p.start_date,
+      targetDate: p.targetDate || p.target_date,
+      pagesPerDay: p.pagesPerDay || p.pages_per_day,
+      totalPages: p.totalPages || p.total_pages,
+      planType: p.planType || p.plan_type || 'individual',
+      groupName: p.groupName || p.group_name || '',
+      members: Array.isArray(p.members) ? p.members : (typeof p.group_members === 'string' ? JSON.parse(p.group_members || '[]') : (p.group_members || [])),
+    }));
 };
 
 export async function fetchPlans() {
   try {
     const plans = await api.plans.list();
-    write(PLANS_KEY, plans);
-    return plans;
+    if (Array.isArray(plans)) {
+      const normalized = plans.map((p) => ({
+        ...p,
+        bookId: p.bookId || p.book_id,
+        userId: p.userId || p.user_id,
+        startDate: p.startDate || p.start_date,
+        targetDate: p.targetDate || p.target_date,
+        pagesPerDay: p.pagesPerDay || p.pages_per_day,
+        totalPages: p.totalPages || p.total_pages,
+        planType: p.planType || p.plan_type || 'individual',
+        groupName: p.groupName || p.group_name || '',
+        members: Array.isArray(p.members) ? p.members : (typeof p.group_members === 'string' ? JSON.parse(p.group_members || '[]') : (p.group_members || [])),
+      }));
+      write(PLANS_KEY, normalized);
+      return normalized;
+    }
+    return getPlans();
   } catch (err) {
     console.warn('Could not fetch plans from backend:', err.message);
     return getPlans();
@@ -545,20 +577,34 @@ export async function searchRegisteredUsers(query = '') {
 }
 
 export async function addPlan(plan) {
+  let created = null;
   try {
-    const created = await api.plans.create(plan);
-    write(PLANS_KEY, [created, ...getPlans()]);
-    return created;
+    created = await api.plans.create(plan);
   } catch (err) {
-    const item = {
-      id: uid('plan'),
-      ...plan,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    write(PLANS_KEY, [item, ...getPlans()]);
-    return item;
+    console.warn('Could not save plan to server, saving locally:', err.message);
   }
+
+  const finalPlan = {
+    id: created?.id || uid('plan'),
+    bookId: created?.bookId || created?.book_id || plan.bookId || plan.book_id,
+    userId: created?.userId || created?.user_id || plan.userId || plan.user_id,
+    startDate: created?.startDate || created?.start_date || plan.startDate,
+    targetDate: created?.targetDate || created?.target_date || plan.targetDate,
+    days: created?.days || plan.days,
+    pagesPerDay: created?.pagesPerDay || created?.pages_per_day || plan.pagesPerDay,
+    totalPages: created?.totalPages || created?.total_pages || plan.totalPages,
+    planType: created?.planType || created?.plan_type || plan.planType || 'individual',
+    groupName: created?.groupName || created?.group_name || plan.groupName || '',
+    members: Array.isArray(created?.members) ? created.members : (plan.members || []),
+    createdAt: created?.createdAt || created?.created_at || new Date().toISOString(),
+    updatedAt: created?.updatedAt || created?.updated_at || new Date().toISOString(),
+  };
+
+  const existing = getPlans().filter(
+    (p) => p.id !== finalPlan.id && !((p.bookId || p.book_id) === finalPlan.bookId && (p.userId || p.user_id) === finalPlan.userId)
+  );
+  write(PLANS_KEY, [finalPlan, ...existing]);
+  return finalPlan;
 }
 
 export async function deletePlan(id) {
@@ -579,8 +625,10 @@ const DAILY_READING_KEY = 'reedshelf_daily_reading';
 export function getDailyQuotaForBook(userId, bookId) {
   if (!userId || !bookId) return null;
   const plans = getUserPlans(userId);
-  const bookPlan = plans.find((p) => p.bookId === bookId);
-  if (bookPlan?.pagesPerDay) return Number(bookPlan.pagesPerDay);
+  const bookPlan = plans.find((p) => (p.bookId || p.book_id) === bookId);
+  if (bookPlan?.pagesPerDay || bookPlan?.pages_per_day) {
+    return Number(bookPlan.pagesPerDay || bookPlan.pages_per_day);
+  }
   return null;
 }
 

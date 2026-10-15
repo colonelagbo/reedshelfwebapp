@@ -137,6 +137,9 @@ plansRouter.post('/', authenticateToken, (req, res) => {
     const membersList = Array.isArray(members) ? members : [];
     const membersJson = JSON.stringify(membersList);
 
+    // Replace any existing plan for this user and book
+    db.run('DELETE FROM reading_plans WHERE user_id = ? AND book_id = ?', [req.user.id, bookId]);
+
     db.run(
       `INSERT INTO reading_plans (
         id, user_id, book_id, start_date, target_date, days, pages_per_day, total_pages, created_at, updated_at, plan_type, group_name, group_members
