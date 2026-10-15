@@ -10,7 +10,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       injectRegister: 'auto',
       includeAssets: [
         'favicon.ico',
@@ -58,6 +58,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webp,woff,woff2}'],
         globIgnores: ['**/pdf.worker*.mjs', '**/*.pdf'],
         navigateFallback: '/index.html',

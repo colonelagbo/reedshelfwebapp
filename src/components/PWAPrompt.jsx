@@ -8,8 +8,15 @@ export function PWAPrompt() {
     needRefresh: [needRefresh, setNeedRefresh],
     updateServiceWorker,
   } = useRegisterSW({
+    immediate: true,
     onRegisteredSW(swUrl, r) {
       console.log('ReedShelf Service Worker successfully registered:', swUrl, r);
+      if (r) {
+        // Periodically check for new updates (every 30 minutes)
+        setInterval(() => {
+          r.update().catch(() => {});
+        }, 30 * 60 * 1000);
+      }
     },
     onRegisterError(error) {
       console.error('ReedShelf Service Worker registration failed:', error);
@@ -20,6 +27,41 @@ export function PWAPrompt() {
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [showIOSInstructions, setShowIOSInstructions] = useState(false);
+
+  // Auto-apply update immediately if needRefresh is triggered
+  useEffect(() => {
+    if (needRefresh) {
+      updateServiceWorker(true);
+    }
+  }, [needRefresh, updateServiceWorker]);
+
+  // Check for updates when phone unlocks / tab becomes active, and reload when new SW takes control
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        navigator.serviceWorker.ready
+          .then((reg) => reg.update())
+          .catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    let refreshing = false;
+    const handleControllerChange = () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
+    };
+  }, []);
 
   useEffect(() => {
     // 1. Check if the app is already launched in standalone mode (installed)

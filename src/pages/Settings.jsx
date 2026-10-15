@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Moon, Save, Type, Check, Shield, Loader2 } from 'lucide-react';
+import { Moon, Save, Type, Check, Shield, Loader2, RefreshCw } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
-import { getCurrentUser, getSettings, saveSettings, fetchSettings } from '../lib/appStore';
+import { getCurrentUser, getSettings, saveSettings, fetchSettings, fetchBooks } from '../lib/appStore';
 
 const Toggle = ({ value, onChange }) => (
   <button
@@ -19,6 +19,53 @@ export function Settings() {
   const [s, setS] = useState(initial);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState(null);
+
+  const handleForceUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateStatus('Clearing stale cache and checking for updates...');
+
+    try {
+      // 1. Unregister and update service workers
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const reg of registrations) {
+          try {
+            await reg.update();
+            await reg.unregister();
+          } catch (e) {
+            console.warn('SW unregister error:', e);
+          }
+        }
+      }
+
+      // 2. Clear all Workbox and browser CacheStorage
+      if ('caches' in window) {
+        const cacheKeys = await caches.keys();
+        await Promise.all(cacheKeys.map((key) => caches.delete(key)));
+      }
+
+      // 3. Clear local books cache and re-fetch from cloud
+      try {
+        localStorage.removeItem('reedshelf_books_v1');
+        await fetchBooks();
+      } catch (err) {
+        console.warn('Books re-fetch during cache clear:', err);
+      }
+
+      setUpdateStatus('Latest version ready! Reloading...');
+      setTimeout(() => {
+        window.location.href = window.location.origin + window.location.pathname + '?reload=' + Date.now();
+      }, 600);
+    } catch (err) {
+      console.error('Error clearing cache:', err);
+      setUpdateStatus('Reloading...');
+      setTimeout(() => {
+        window.location.reload();
+      }, 600);
+    }
+  };
 
   useEffect(() => {
     if (!user?.id) return;
@@ -178,6 +225,60 @@ export function Settings() {
                 </div>
                 <Toggle value={s.keyboardShortcuts} onChange={(v) => update('keyboardShortcuts', v)} />
               </div>
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-[#e4e1d6] bg-white p-6 dark:border-white/10 dark:bg-[#142326]">
+            <div className="flex items-center gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                <RefreshCw size={19} className={checkingUpdate ? "animate-spin" : ""} />
+              </span>
+              <div>
+                <h2 className="font-bold">App Updates & Mobile Cache</h2>
+                <p className="text-sm text-[#6b7a77] dark:text-white/60">
+                  Ensure your phone or computer is displaying the newest ReedShelf features and synced cloud data.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl bg-[#fbfcf9] p-4 border border-[#e4e1d6]/70 dark:bg-white/5 dark:border-white/10">
+                <div>
+                  <p className="font-semibold text-sm text-[#0b1619] dark:text-white flex items-center gap-2">
+                    <span>Cloud Sync & Latest Build</span>
+                    <span className="rounded-full bg-[#009689]/10 px-2 py-0.5 text-[11px] font-bold text-[#009689] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                      Active
+                    </span>
+                  </p>
+                  <p className="text-xs text-[#6b7a77] dark:text-white/60 mt-0.5">
+                    Tap to clear stale mobile service-worker caches, download the newest bundle, and resync your library.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleForceUpdate}
+                  disabled={checkingUpdate}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#009689] px-4 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-[#007268] disabled:opacity-50 touch-manipulation cursor-pointer"
+                >
+                  {checkingUpdate ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" />
+                      <span>Updating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw size={15} />
+                      <span>Clear Cache & Reload</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {updateStatus && (
+                <div className="rounded-xl bg-[#e6f4f2] p-3 text-xs font-semibold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8] animate-in fade-in">
+                  {updateStatus}
+                </div>
+              )}
             </div>
           </section>
 
