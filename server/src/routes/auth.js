@@ -14,8 +14,24 @@ import {
 } from '../services/totp.js';
 import { sendEmailVerificationCode } from '../services/email.js';
 import { createVerification, verifyCode } from '../services/verification.js';
+import multer from 'multer';
+import { supabaseStorage } from '../storage/supabase.js';
 
 export const authRouter = express.Router();
+
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files (JPEG, PNG, WebP, GIF) are allowed for profile pictures.'));
+    }
+  },
+});
 
 const uid = (prefix = 'user') => `${prefix}_${crypto.randomBytes(8).toString('hex')}_${Date.now()}`;
 
@@ -631,8 +647,114 @@ authRouter.get('/me', authenticateToken, (req, res) => {
   }
 });
 
+// POST /api/auth/avatar - Upload profile picture directly to Supabase Storage bucket
+authRouter.post('/avatar', authenticateToken, (req, res, next) => {
+  avatarUpload.single('avatar')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'Profile photo must be 5MB or smaller.' });
+      }
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    } else if (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'No avatar image file was provided.' });
+    }
+
+    let ext = 'jpg';
+    if (file.mimetype.includes('png')) ext = 'png';
+    else if (file.mimetype.includes('webp')) ext = 'webp';
+    else if (file.mimetype.includes('gif')) ext = 'gif';
+
+    const storageKey = `avatars/${req.user.id}.${ext}`;
+    const uploadResult = await supabaseStorage.upload(storageKey, file.buffer, file.mimetype);
+
+    // Cache-buster query param ensures fresh picture loads across devices and browsers
+    const finalAvatarUrl = `${uploadResult.url}${uploadResult.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+
+    db.run('UPDATE users SET avatar = ? WHERE id = ?', [finalAvatarUrl, req.user.id]);
+    const updated = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    await recordUser(updated);
+
+    console.log(`[Avatar] Successfully saved avatar for user ${req.user.id} -> ${storageKey}`);
+
+    res.json({
+      user: {
+        id: updated.id,
+        name: updated.name,
+        email: updated.email,
+        avatar: updated.avatar,
+        role: updated.role || 'user',
+        status: updated.status || 'active',
+        twoFactorEnabled: Boolean(updated.two_factor_enabled),
+        createdAt: updated.created_at,
+      },
+      avatarUrl: updated.avatar,
+    });
+  } catch (err) {
+    console.error('Avatar upload error:', err);
+    res.status(500).json({ error: `Failed to upload avatar: ${err.message}` });
+  }
+});
+
+// DELETE /api/auth/avatar - Remove profile picture
+authRouter.delete('/avatar', authenticateToken, async (req, res) => {
+  try {
+    db.run('UPDATE users SET avatar = NULL WHERE id = ?', [req.user.id]);
+    const updated = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    await recordUser(updated);
+
+    res.json({
+      user: {
+        id: updated.id,
+        name: updated.name,
+        email: updated.email,
+        avatar: null,
+        role: updated.role || 'user',
+        status: updated.status || 'active',
+        twoFactorEnabled: Boolean(updated.two_factor_enabled),
+        createdAt: updated.created_at,
+      }
+    });
+  } catch (err) {
+    console.error('Delete avatar error:', err);
+    res.status(500).json({ error: 'Failed to delete avatar.' });
+  }
+});
+
+// GET /api/auth/avatar/:id - Stream or redirect to user's avatar
+authRouter.get('/avatar/:id', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const user = db.get('SELECT avatar FROM users WHERE id = ?', [userId]);
+    if (!user || !user.avatar) {
+      return res.status(404).json({ error: 'Avatar not found.' });
+    }
+    if (user.avatar.startsWith('http')) {
+      return res.redirect(302, user.avatar);
+    }
+    if (user.avatar.startsWith('data:image/')) {
+      const matches = user.avatar.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        res.setHeader('Content-Type', matches[1]);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(Buffer.from(matches[2], 'base64'));
+      }
+    }
+    return res.status(404).json({ error: 'Avatar not found.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to retrieve avatar.' });
+  }
+});
+
 // PUT /api/auth/profile
-authRouter.put('/profile', authenticateToken, (req, res) => {
+authRouter.put('/profile', authenticateToken, async (req, res) => {
   try {
     const { name, avatar } = req.body;
     const updates = [];
@@ -644,8 +766,31 @@ authRouter.put('/profile', authenticateToken, (req, res) => {
     }
 
     if (avatar !== undefined) {
+      let finalAvatar = avatar;
+      // If user provided base64 data URL, upload to Supabase bucket rather than storing raw base64
+      if (avatar && typeof avatar === 'string' && avatar.startsWith('data:image/')) {
+        try {
+          const matches = avatar.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const contentType = matches[1];
+            const buffer = Buffer.from(matches[2], 'base64');
+            let ext = 'jpg';
+            if (contentType.includes('png')) ext = 'png';
+            else if (contentType.includes('webp')) ext = 'webp';
+            else if (contentType.includes('gif')) ext = 'gif';
+            const storageKey = `avatars/${req.user.id}.${ext}`;
+            const uploadResult = await supabaseStorage.upload(storageKey, buffer, contentType);
+            finalAvatar = `${uploadResult.url}${uploadResult.url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+          }
+        } catch (uploadErr) {
+          console.warn('[Avatar Sync] Could not upload base64 avatar to cloud:', uploadErr.message);
+        }
+      } else if (!avatar) {
+        finalAvatar = null;
+      }
+
       updates.push('avatar = ?');
-      params.push(avatar);
+      params.push(finalAvatar);
     }
 
     if (updates.length === 0) {
@@ -655,7 +800,9 @@ authRouter.put('/profile', authenticateToken, (req, res) => {
     params.push(req.user.id);
     db.run(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, params);
 
-    const updated = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [req.user.id]);
+    const updated = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    await recordUser(updated);
+
     res.json({
       user: {
         id: updated.id,

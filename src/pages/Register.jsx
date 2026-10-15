@@ -60,7 +60,7 @@ export function Register() {
     <AuthLayout
       split={true}
       title="Create a new account"
-      subtitle="It’s quick and easy to start your personal reading sanctuary."
+      subtitle="Create your account to start reading and tracking your books."
       leftHeadline={
         <>
           Roots before branches.{' '}

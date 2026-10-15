@@ -22,6 +22,9 @@ export const authStorage = {
     } else {
       localStorage.removeItem(CURRENT_USER_KEY);
     }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('reedshelf:user_updated', { detail: user }));
+    }
   },
 };
 
@@ -118,6 +121,25 @@ export const api = {
       const res = await apiRequest('/api/auth/profile', {
         method: 'PUT',
         body: JSON.stringify({ name, avatar }),
+      });
+      if (res.user) authStorage.setUser(res.user);
+      return res.user;
+    },
+
+    async uploadAvatar(file) {
+      const formData = new FormData();
+      formData.append('avatar', file);
+      const res = await apiRequest('/api/auth/avatar', {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.user) authStorage.setUser(res.user);
+      return res;
+    },
+
+    async removeAvatar() {
+      const res = await apiRequest('/api/auth/avatar', {
+        method: 'DELETE',
       });
       if (res.user) authStorage.setUser(res.user);
       return res.user;

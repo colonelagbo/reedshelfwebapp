@@ -202,7 +202,7 @@ export function Library() {
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
             <span className="text-xs font-bold uppercase tracking-wider text-[#007268] dark:text-[#5fc4b8]">
-              Your Personal Sanctuary
+              Personal Library
             </span>
             <h1 className="mt-0.5 text-2xl sm:text-3xl font-extrabold text-[#0b1619] dark:text-white tracking-tight">
               Library Shelf

@@ -41,7 +41,11 @@ export function AppShell({ children }) {
     };
     updateStorage();
     window.addEventListener('reedshelf:books_updated', updateStorage);
-    return () => window.removeEventListener('reedshelf:books_updated', updateStorage);
+    window.addEventListener('reedshelf:user_updated', updateStorage);
+    return () => {
+      window.removeEventListener('reedshelf:books_updated', updateStorage);
+      window.removeEventListener('reedshelf:user_updated', updateStorage);
+    };
   }, []);
 
   // Close drawer on route change

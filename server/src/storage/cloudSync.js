@@ -51,6 +51,19 @@ export async function syncUsersFromCloud(force = false) {
           } catch {
             // Ignore collision
           }
+        } else {
+          // If cloud has an updated avatar or name, sync to local SQLite
+          const localUser = localUserMap.get(u.id);
+          if (localUser) {
+            if (u.avatar !== undefined && u.avatar !== localUser.avatar) {
+              db.run('UPDATE users SET avatar = ? WHERE id = ?', [u.avatar || null, u.id]);
+              localUser.avatar = u.avatar;
+            }
+            if (u.name && u.name !== localUser.name) {
+              db.run('UPDATE users SET name = ? WHERE id = ?', [u.name, u.id]);
+              localUser.name = u.name;
+            }
+          }
         }
       }
     }

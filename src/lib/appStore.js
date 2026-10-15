@@ -126,6 +126,26 @@ export async function updateUser(userId, changes) {
   }
 }
 
+export async function uploadAvatar(file) {
+  try {
+    const res = await api.auth.uploadAvatar(file);
+    return res.user;
+  } catch (err) {
+    console.error('Failed to upload avatar to cloud:', err);
+    throw err;
+  }
+}
+
+export async function removeAvatar() {
+  try {
+    const user = await api.auth.removeAvatar();
+    return user;
+  } catch (err) {
+    console.error('Failed to remove avatar:', err);
+    throw err;
+  }
+}
+
 export async function resetPassword(email, newPassword) {
   try {
     await api.auth.resetPassword(email, newPassword);

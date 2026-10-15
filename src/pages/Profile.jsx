@@ -25,6 +25,8 @@ import {
   getUserPlans,
   getUserStorageUsage,
   updateUser,
+  uploadAvatar,
+  removeAvatar,
   fetchBooks,
   fetchPlans,
   setCurrentUser,
@@ -77,8 +79,20 @@ export function Profile() {
       }
     }).catch(() => {});
 
+    const handleUserUpdate = (e) => {
+      const u = e?.detail || getCurrentUser();
+      if (u) {
+        setCurrentUserData(u);
+        setAvatar(u.avatar || '');
+        setName(u.name || '');
+      }
+    };
     window.addEventListener('reedshelf:books_updated', refresh);
-    return () => window.removeEventListener('reedshelf:books_updated', refresh);
+    window.addEventListener('reedshelf:user_updated', handleUserUpdate);
+    return () => {
+      window.removeEventListener('reedshelf:books_updated', refresh);
+      window.removeEventListener('reedshelf:user_updated', handleUserUpdate);
+    };
   }, [user?.id, user?.role]);
 
   const handleDisable2FA = async () => {
@@ -118,16 +132,29 @@ export function Profile() {
     }
   };
 
-  const choose = (e) => {
+  const choose = async (e) => {
     const f = e.target.files?.[0];
     if (!f || !f.type.startsWith('image/')) return;
-    if (f.size > 4 * 1024 * 1024) {
-      setError('Photo must be 4MB or smaller.');
+    if (f.size > 5 * 1024 * 1024) {
+      setError('Photo must be 5MB or smaller.');
       return;
     }
-    const r = new FileReader();
-    r.onload = () => setAvatar(r.result);
-    r.readAsDataURL(f);
+    setSavingProfile(true);
+    setError('');
+    setMessage('');
+    try {
+      const updatedUser = await uploadAvatar(f);
+      if (updatedUser) {
+        setAvatar(updatedUser.avatar);
+        setCurrentUserData(updatedUser);
+        setMessage('Profile picture saved to cloud.');
+        setTimeout(() => setMessage(''), 3000);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to upload photo.');
+    } finally {
+      setSavingProfile(false);
+    }
   };
 
   const changePassword = async () => {
