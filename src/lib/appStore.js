@@ -150,7 +150,33 @@ function notifyBooksChanged() {
   }
 }
 
-export const getBooks = () => read(BOOKS_KEY, []);
+export const isTestBook = (b) => {
+  if (!b) return true;
+  const title = (b.title || '').toLowerCase();
+  const author = (b.author || '').toLowerCase();
+  const file = (b.fileName || b.file_name || '').toLowerCase();
+  return (
+    title.includes('e2e test') ||
+    title.includes('sample test') ||
+    title.includes('direct node upload') ||
+    title.includes('/api/books/') ||
+    author === 'jane doe' ||
+    author === 'test author' ||
+    file.includes('test_book') ||
+    file.includes('sample_book') ||
+    file.includes('sample.pdf') ||
+    file.includes('test_upload')
+  );
+};
+
+export const getBooks = () => {
+  const books = read(BOOKS_KEY, []);
+  const clean = books.filter((b) => !isTestBook(b));
+  if (clean.length !== books.length) {
+    write(BOOKS_KEY, clean);
+  }
+  return clean;
+};
 
 export const getUserBooks = (userId) => {
   const books = getBooks();
@@ -159,7 +185,7 @@ export const getUserBooks = (userId) => {
   if (user?.role === 'admin') return books;
   return books.filter((b) => {
     const owner = b.uploadedBy || b.uploaded_by;
-    return !owner || owner === userId || owner === 'demo_user';
+    return !owner || owner === userId;
   });
 };
 
@@ -172,7 +198,7 @@ export function getUserStorageUsage(userId) {
   if (userId && !isAdmin) {
     userBooks = books.filter((b) => {
       const owner = b.uploadedBy || b.uploaded_by;
-      return owner === userId || owner === 'demo_user' || !owner;
+      return owner === userId;
     });
   } else if (isAdmin) {
     const adminBooks = books.filter((b) => {
@@ -223,36 +249,17 @@ export function getDeletedBookIds() {
 }
 
 export async function fetchBooks() {
-  const localBooks = getBooks();
   const user = getCurrentUser();
   const deletedSet = new Set(getDeletedBookIds());
-
-  const mergeBooks = (primary, secondary) => {
-    const map = new Map();
-    if (Array.isArray(secondary)) {
-      for (const b of secondary) {
-        if (b && b.id && !deletedSet.has(b.id)) map.set(b.id, b);
-      }
-    }
-    if (Array.isArray(primary)) {
-      for (const b of primary) {
-        if (b && b.id && !deletedSet.has(b.id)) map.set(b.id, b);
-      }
-    }
-    return Array.from(map.values()).sort(
-      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-    );
-  };
 
   // 1. Try fetching from Backend API
   try {
     const books = await api.books.list();
     if (Array.isArray(books)) {
-      // Authoritative cloud sync merged with local cache to prevent wiping out newly uploaded or local books
-      const merged = mergeBooks(books, localBooks);
-      write(BOOKS_KEY, merged);
+      const cleanBooks = books.filter((b) => b && b.id && !deletedSet.has(b.id) && !isTestBook(b));
+      write(BOOKS_KEY, cleanBooks);
       notifyBooksChanged();
-      return merged;
+      return cleanBooks;
     }
   } catch (err) {
     console.warn('Could not fetch books from backend API, checking Supabase direct:', err.message);
@@ -269,24 +276,25 @@ export async function fetchBooks() {
         const { data, error } = await query.order('created_at', { ascending: false });
 
         if (!error && Array.isArray(data) && data.length > 0) {
-          const formatted = data.map((b) => ({
-            id: b.id,
-            title: b.title,
-            author: b.author,
-            fileName: b.file_name,
-            fileType: b.file_type,
-            size: Number(b.file_size || 0),
-            totalPages: Number(b.total_pages || 0),
-            uploadedBy: b.uploaded_by,
-            r2Key: b.r2_key,
-            coverDataUrl: b.cover_data_url,
-            coverUrl: b.cover_url,
-            createdAt: b.created_at,
-          }));
-          const merged = mergeBooks(formatted, localBooks);
-          write(BOOKS_KEY, merged);
+          const clean = data
+            .map((b) => ({
+              id: b.id,
+              title: b.title,
+              author: b.author,
+              fileName: b.file_name,
+              fileType: b.file_type,
+              size: Number(b.file_size || 0),
+              totalPages: Number(b.total_pages || 0),
+              uploadedBy: b.uploaded_by,
+              r2Key: b.r2_key,
+              coverDataUrl: b.cover_data_url,
+              coverUrl: b.cover_url,
+              createdAt: b.created_at,
+            }))
+            .filter((b) => !deletedSet.has(b.id) && !isTestBook(b));
+          write(BOOKS_KEY, clean);
           notifyBooksChanged();
-          return merged;
+          return clean;
         }
       }
     } catch (sbErr) {
