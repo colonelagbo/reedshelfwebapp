@@ -688,8 +688,8 @@ export function ReadingPlans() {
                   return true;
                 })
                 .map((plan) => {
-                const book = books.find((b) => b.id === plan.bookId);
-                const cover = book?.coverDataUrl || book?.coverUrl;
+                const isPdfUrl = (url) => typeof url === 'string' && (url.toLowerCase().endsWith('.pdf') || url.endsWith('/file') || url.includes('/file?'));
+                const cover = book?.coverDataUrl || (book?.coverUrl && !isPdfUrl(book.coverUrl) ? book.coverUrl : (book?.id ? `/api/books/${book.id}/cover` : null));
                 const currentPage = book ? getProgress(user.id, book.id).page : 1;
                 const total = book?.totalPages || plan.totalPages || 1;
                 const pct = Math.min(100, Math.round((currentPage / total) * 100));

@@ -514,7 +514,30 @@ booksRouter.post('/record', authenticateToken, async (req, res) => {
     const bookTitle = (title && title.trim()) || (fileName ? fileName.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim() : 'Untitled Book');
     const bookAuthor = (author && author.trim()) || 'Unknown author';
     const pages = parseInt(totalPages || '0', 10) || 0;
-    const finalCoverUrl = coverUrl || `/api/books/${bookId}/file`;
+    let finalCoverUrl = coverUrl;
+    if (!finalCoverUrl || finalCoverUrl.endsWith('/file') || finalCoverUrl.toLowerCase().endsWith('.pdf')) {
+      finalCoverUrl = `/api/books/${bookId}/cover`;
+    }
+
+    if (coverDataUrl && coverDataUrl.startsWith('data:image/') && (!coverUrl || !coverUrl.match(/\.(webp|jpe?g|png)($|\?)/i))) {
+      try {
+        const matches = coverDataUrl.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          const contentType = matches[1];
+          const buffer = Buffer.from(matches[2], 'base64');
+          const ext = contentType.includes('webp') ? 'webp' : 'jpg';
+          const coverKey = `covers/${bookId}.${ext}`;
+          const client = getSupabaseClient();
+          if (client) {
+            await client.storage.from(config.supabase.bucketName || 'reedshelf-books').upload(coverKey, buffer, { contentType, upsert: true });
+            const { data: cData } = client.storage.from(config.supabase.bucketName || 'reedshelf-books').getPublicUrl(coverKey);
+            if (cData?.publicUrl) finalCoverUrl = cData.publicUrl;
+          }
+        }
+      } catch (cErr) {
+        console.warn('Could not persist cover image to storage:', cErr.message);
+      }
+    }
 
     // 1. Persist to local database
     db.run(
@@ -640,15 +663,15 @@ booksRouter.get('/:id/file', optionalToken, async (req, res) => {
     if (config.isSupabaseConfigured() && storageKey) {
       const client = getSupabaseClient();
       if (client) {
-        const { data } = client.storage.from(config.supabase.bucketName).getPublicUrl(storageKey);
-        if (data?.publicUrl && !data.publicUrl.includes('xiiemdxbdrlzpvhaecmt')) {
+        const { data } = client.storage.from(config.supabase.bucketName || 'reedshelf-books').getPublicUrl(storageKey);
+        if (data?.publicUrl) {
           return res.redirect(302, data.publicUrl);
         }
       }
     }
 
-    // 3. If book has direct coverUrl pointing to CDN, redirect (ensure it is not pointing to dead domain)
-    if (book.cover_url && book.cover_url.startsWith('http') && !book.cover_url.includes('xiiemdxbdrlzpvhaecmt') && !book.cover_url.match(/\.(jpe?g|png|webp|gif|svg)($|\?)/i)) {
+    // 3. If book has direct coverUrl pointing to CDN, redirect
+    if (book.cover_url && book.cover_url.startsWith('http') && !book.cover_url.match(/\.(jpe?g|png|webp|gif|svg)($|\?)/i)) {
       return res.redirect(302, book.cover_url);
     }
 
@@ -658,6 +681,59 @@ booksRouter.get('/:id/file', optionalToken, async (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ error: `Could not retrieve book file: ${err.message}` });
     }
+  }
+});
+
+// GET /api/books/:id/cover - Stream or redirect to high-resolution original book cover image
+booksRouter.get('/:id/cover', optionalToken, async (req, res) => {
+  try {
+    const bookId = req.params.id;
+    let book = db.get('SELECT * FROM books WHERE id = ?', [bookId]);
+
+    if (!book) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { data } = await supabase.from('books').select('*').eq('id', bookId).single();
+          if (data) book = data;
+        } catch {}
+      }
+    }
+
+    if (!book) {
+      return res.status(404).json({ error: 'Book cover not found.' });
+    }
+
+    // 1. If book has a direct cover image URL (ends with .webp, .jpg, .png)
+    if (book.cover_url && book.cover_url.match(/\.(webp|jpe?g|png|gif|svg)($|\?)/i)) {
+      return res.redirect(302, book.cover_url);
+    }
+
+    // 2. Check Supabase Storage for covers/:id.webp
+    const client = getSupabaseClient();
+    if (client) {
+      const { data: pubData } = client.storage.from(config.supabase.bucketName || 'reedshelf-books').getPublicUrl(`covers/${bookId}.webp`);
+      if (pubData?.publicUrl) {
+        return res.redirect(302, pubData.publicUrl);
+      }
+    }
+
+    // 3. Fallback to cover_data_url if base64
+    if (book.cover_data_url && book.cover_data_url.startsWith('data:image/')) {
+      const matches = book.cover_data_url.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+      if (matches && matches.length === 3) {
+        const contentType = matches[1];
+        const buffer = Buffer.from(matches[2], 'base64');
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.send(buffer);
+      }
+    }
+
+    return res.status(404).json({ error: 'Cover not available.' });
+  } catch (err) {
+    console.error('Error fetching cover:', err.message);
+    res.status(500).json({ error: 'Failed to retrieve cover.' });
   }
 });
 

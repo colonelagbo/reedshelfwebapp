@@ -184,7 +184,7 @@ export function Upload() {
         }
         console.log(`[Upload] Cloudflare R2 upload complete: ${uploadPrep.storageKey}`);
 
-        const coverUrl = `/api/books/${uploadPrep.bookId}/file`;
+        const coverUrl = `/api/books/${uploadPrep.bookId}/cover`;
         book = await api.books.recordBook({
           id: uploadPrep.bookId,
           title,
@@ -217,8 +217,28 @@ export function Upload() {
             throw new Error(`Cloud storage upload failed: ${uploadErr.message}`);
           }
 
-          const { data: publicUrlData } = supabase.storage.from('reedshelf-books').getPublicUrl(storageKey);
-          const coverUrl = publicUrlData?.publicUrl || `/api/books/${bookId}/file`;
+          let coverUrl = `/api/books/${bookId}/cover`;
+
+          // Upload original rendered cover image to bucket covers/ directory
+          if (coverDataUrl && coverDataUrl.startsWith('data:image/')) {
+            try {
+              const coverRes = await fetch(coverDataUrl);
+              const coverBlob = await coverRes.blob();
+              const coverKey = `covers/${bookId}.webp`;
+              const { error: cUpErr } = await supabase.storage
+                .from('reedshelf-books')
+                .upload(coverKey, coverBlob, { contentType: 'image/webp', upsert: true });
+
+              if (!cUpErr) {
+                const { data: cData } = supabase.storage.from('reedshelf-books').getPublicUrl(coverKey);
+                if (cData?.publicUrl) {
+                  coverUrl = cData.publicUrl;
+                }
+              }
+            } catch (coverErr) {
+              console.warn('[Upload] Cover upload notice:', coverErr.message);
+            }
+          }
 
           // Record book metadata in database
           book = await api.books.recordBook({
