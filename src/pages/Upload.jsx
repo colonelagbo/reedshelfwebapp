@@ -238,15 +238,19 @@ export function Upload() {
           });
           recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
         } catch (cloudErr) {
-          console.warn('[Upload Warning] Supabase storage upload failed:', cloudErr.message, 'Falling back to direct server storage...');
-          // Fallback to local server storage
-          book = await uploadBookFile(file, {
-            title,
-            author,
-            totalPages,
-            coverDataUrl,
-          });
-          recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
+          console.warn('[Upload Warning] Direct browser Supabase upload failed:', cloudErr.message, 'Trying backend Supabase upload...');
+          try {
+            book = await uploadBookFile(file, {
+              title,
+              author,
+              totalPages,
+              coverDataUrl,
+            });
+            recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
+          } catch (serverErr) {
+            console.error('[Upload Error] Failed to upload to Supabase bucket:', serverErr);
+            throw new Error(`Failed to store upload in Supabase bucket: ${cloudErr.message || serverErr.message}`);
+          }
         }
       } else {
         // Direct Server Storage upload (supports up to 50 MB)

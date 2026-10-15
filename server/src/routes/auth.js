@@ -149,8 +149,7 @@ authRouter.post('/register', async (req, res) => {
     const userId = uid('user');
     const createdAt = new Date().toISOString();
 
-    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
-    const initialRole = (adminEmail && trimmedEmail === adminEmail) ? 'admin' : 'user';
+    const initialRole = config.isAdminEmail(trimmedEmail) ? 'admin' : 'user';
 
     let twoFactorSecret = null;
     let twoFactorEnabled = 0;
@@ -259,9 +258,8 @@ authRouter.post('/login', async (req, res) => {
       });
     }
 
-    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
     let effectiveRole = user.role || 'user';
-    if (adminEmail && user.email.toLowerCase() === adminEmail) {
+    if (config.isAdminEmail(user.email)) {
       effectiveRole = 'admin';
       if (user.role !== 'admin') {
         db.run("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
@@ -331,9 +329,8 @@ authRouter.post('/google', async (req, res) => {
         });
       }
 
-      const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
       let effectiveRole = user.role || 'user';
-      if (adminEmail && user.email.toLowerCase() === adminEmail) {
+      if (config.isAdminEmail(user.email)) {
         effectiveRole = 'admin';
         if (user.role !== 'admin') {
           db.run("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
@@ -364,8 +361,7 @@ authRouter.post('/google', async (req, res) => {
 
     const userId = uid('user');
     const createdAt = new Date().toISOString();
-    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
-    const initialRole = (adminEmail && trimmedEmail === adminEmail) ? 'admin' : 'user';
+    const initialRole = config.isAdminEmail(trimmedEmail) ? 'admin' : 'user';
 
     db.run(
       'INSERT INTO users (id, name, email, password, avatar, role, status, created_at, two_factor_enabled, two_factor_secret, google_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -599,9 +595,8 @@ authRouter.post('/2fa/verify', async (req, res) => {
 authRouter.get('/me', authenticateToken, (req, res) => {
   try {
     const user = req.user;
-    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
     let effectiveRole = user.role || 'user';
-    if (adminEmail && user.email.toLowerCase() === adminEmail) {
+    if (config.isAdminEmail(user.email)) {
       effectiveRole = 'admin';
       if (user.role !== 'admin') {
         db.run("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);

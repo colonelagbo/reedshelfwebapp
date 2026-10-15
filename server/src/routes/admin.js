@@ -924,10 +924,8 @@ adminRouter.post('/claim-admin', async (req, res) => {
     }
 
     const { setupKey } = req.body || {};
-    const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : null;
     const userEmail = (req.user.email || '').trim().toLowerCase();
-
-    const isMatchEmail = adminEmail && userEmail === adminEmail;
+    const isMatchEmail = config.isAdminEmail(userEmail);
     const isCorrectKey = setupKey && (setupKey === (process.env.ADMIN_SETUP_KEY || 'ReedshelfAdmin2026!') || setupKey === config.jwtSecret);
 
     if (!isMatchEmail && !isCorrectKey) {

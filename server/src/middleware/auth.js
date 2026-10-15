@@ -29,7 +29,7 @@ export async function authenticateToken(req, res, next) {
     // In serverless environments, if a new container started up and doesn't have the user cached yet,
     // restore the user record from the cryptographically verified JWT payload.
     if (!user && payload.email) {
-      const isAdmin = payload.role === 'admin' || payload.email.toLowerCase() === 'link4emmy@gmail.com';
+      const isAdmin = payload.role === 'admin' || config.isAdminEmail(payload.email);
       user = {
         id: payload.id || (isAdmin ? 'admin_usr_link4emmy' : ('user_' + payload.email.replace(/[^a-zA-Z0-9]/g, '_'))),
         name: payload.name || (isAdmin ? 'Platform Admin' : 'User'),
@@ -68,10 +68,9 @@ export async function authenticateToken(req, res, next) {
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data: { user: sbUser }, error: sbError } = await supabase.auth.getUser(token);
+      const { data: { user: sbUser } = {}, error: sbError } = await supabase.auth.getUser(token);
       if (!sbError && sbUser && sbUser.email) {
-        const adminEmail = process.env.ADMIN_EMAIL ? process.env.ADMIN_EMAIL.trim().toLowerCase() : 'link4emmy@gmail.com';
-        const isAdmin = sbUser.email.toLowerCase() === adminEmail || sbUser.user_metadata?.role === 'admin';
+        const isAdmin = config.isAdminEmail(sbUser.email) || sbUser.user_metadata?.role === 'admin';
 
         let user = db.get(
           'SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ? OR LOWER(email) = ?',

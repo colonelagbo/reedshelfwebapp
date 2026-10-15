@@ -832,11 +832,10 @@ export async function getBookFile(bookId) {
   const b = all.find((x) => x.id === bookId);
   const storageKey = b?.r2Key || b?.r2_key;
 
-  // 4a. If book has a direct public CDN URL (validate it is a PDF and not an image cover or dead domain)
+  // 4a. If book has a direct public CDN URL (validate it is a PDF and not an image cover)
   if (
     b?.coverUrl &&
     b.coverUrl.startsWith('http') &&
-    !b.coverUrl.includes('xiiemdxbdrlzpvhaecmt') &&
     !b.coverUrl.match(/\.(jpe?g|png|webp|gif|svg)($|\?)/i)
   ) {
     try {

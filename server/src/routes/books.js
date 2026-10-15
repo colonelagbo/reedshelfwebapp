@@ -30,10 +30,7 @@ const upload = multer({
 const uid = (prefix = 'book') => `${prefix}_${crypto.randomBytes(8).toString('hex')}_${Date.now()}`;
 
 function formatBookRow(b) {
-  let coverUrl = b.cover_url || b.coverUrl || null;
-  if (coverUrl && coverUrl.includes('xiiemdxbdrlzpvhaecmt')) {
-    coverUrl = `/api/books/${b.id}/file`;
-  }
+  const coverUrl = b.cover_url || b.coverUrl || null;
   return {
     id: b.id,
     title: b.title,
@@ -334,6 +331,15 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
       await r2Storage.upload(storageKey, file.buffer, file.mimetype || 'application/pdf');
       storageType = 'r2';
       console.log(`[Upload] Successfully stored book "${bookTitle}" in Cloudflare R2: ${storageKey}`);
+    } else if (config.isSupabaseConfigured()) {
+      // 2. Direct upload to Supabase Storage bucket
+      storageKey = `books/${req.user.id}/${bookId}/${safeName}`;
+      console.log(`[Upload] Uploading book "${bookTitle}" directly to Supabase Storage bucket "${config.supabase.bucketName}"...`);
+      const sbResult = await supabaseStorage.upload(storageKey, file.buffer, file.mimetype || 'application/pdf');
+      storageKey = sbResult.key;
+      storageType = 'supabase';
+      fileUrl = sbResult.publicUrl || sbResult.url || `/api/books/${bookId}/file`;
+      console.log(`[Upload] Successfully stored book "${bookTitle}" in Supabase Storage: ${storageKey}`);
     } else {
       // Fallback to local server disk storage
       console.log(`[Upload] Saving book "${bookTitle}" to Local Server Storage...`);
