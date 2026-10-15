@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-export const DEFAULT_SUPABASE_URL = 'https://xiiemdxbdrlzpvhaecmt.supabase.co';
+export const DEFAULT_SUPABASE_URL = '';
 export const DEFAULT_SUPABASE_BUCKET = 'reedshelf-books';
 
 let cachedClient = null;
@@ -22,19 +22,39 @@ export const setSupabaseKey = (key, url) => {
 };
 
 export const getSupabaseConfig = () => {
-  const url =
-    import.meta.env.VITE_SUPABASE_URL ||
-    (typeof window !== 'undefined' ? localStorage.getItem('reedshelf_supabase_url') : '') ||
-    DEFAULT_SUPABASE_URL;
-  const key =
+  let storedUrl = typeof window !== 'undefined' ? localStorage.getItem('reedshelf_supabase_url') : '';
+  if (storedUrl && storedUrl.includes('xiiemdxbdrlzpvhaecmt')) {
+    try {
+      localStorage.removeItem('reedshelf_supabase_url');
+    } catch (_e) {
+      // safe fallback if storage unavailable
+    }
+    storedUrl = '';
+  }
+
+  const envUrl = import.meta.env.VITE_SUPABASE_URL || '';
+  const cleanEnvUrl = (envUrl.includes('xiiemdxbdrlzpvhaecmt') || envUrl.includes('placeholder')) ? '' : envUrl;
+
+  const url = cleanEnvUrl || storedUrl || DEFAULT_SUPABASE_URL;
+  const rawKey =
     import.meta.env.VITE_SUPABASE_KEY ||
     import.meta.env.VITE_SUPABASE_ANON_KEY ||
     getStoredKey();
+  const key = rawKey && !rawKey.startsWith('sb_secret_') ? rawKey : '';
+
+  const isConfigured = Boolean(
+    url &&
+    key &&
+    !url.includes('placeholder') &&
+    !url.includes('xiiemdxbdrlzpvhaecmt') &&
+    !url.includes('your-project')
+  );
+
   return {
     url,
     key,
     bucket: import.meta.env.VITE_SUPABASE_BUCKET || DEFAULT_SUPABASE_BUCKET,
-    isConfigured: Boolean(url && key && !url.includes('placeholder')),
+    isConfigured,
   };
 };
 

@@ -25,7 +25,17 @@ export const config = {
   },
 
   isSupabaseConfigured() {
-    return Boolean(this.supabase.url && this.supabase.key);
+    const url = this.supabase.url || '';
+    const key = this.supabase.key || '';
+    if (!url || !key) return false;
+    if (url.includes('xiiemdxbdrlzpvhaecmt') || url.includes('placeholder') || url.includes('your-project')) {
+      return false;
+    }
+    if (key.startsWith('sb_secret_')) {
+      // sb_secret_ prefix indicates a Supabase Management API token, not a project API key
+      return false;
+    }
+    return true;
   },
 
   cloudflare: {

@@ -1,5 +1,5 @@
 import { api, authStorage } from './api';
-import { supabase } from './supabaseClient';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 const USERS_KEY = 'reedshelf_users_v1';
 const SESSION_KEY = 'reedshelf_session_v1';
@@ -258,8 +258,8 @@ export async function fetchBooks() {
     console.warn('Could not fetch books from backend API, checking Supabase direct:', err.message);
   }
 
-  // 2. Direct Supabase Database fallback
-  if (supabase) {
+  // 2. Direct Supabase Database fallback (only if validly configured)
+  if (supabase && isSupabaseConfigured()) {
     try {
       if (user?.id) {
         let query = supabase.from('books').select('*');
@@ -815,13 +815,30 @@ export async function getBookFile(bookId) {
     console.warn('Notice reading file from IndexedDB:', err);
   }
 
-  // 3. If not in local cache, fetch directly from cloud CDN / Supabase Storage
+  // 3. Try fetching from Backend stream endpoint first (instantaneous from local server disk)
+  try {
+    const arrayBuffer = await api.books.getFileData(bookId);
+    if (arrayBuffer && arrayBuffer.byteLength > 0) {
+      memoryFileCache.set(bookId, arrayBuffer);
+      saveBookFile(bookId, arrayBuffer).catch(() => {});
+      return cloneFileData(arrayBuffer);
+    }
+  } catch (err) {
+    console.warn(`[Reader] Backend streaming notice for book ${bookId}:`, err.message);
+  }
+
+  // 4. If not available from backend, check direct CDN URL or Supabase Storage
   const all = getBooks();
   const b = all.find((x) => x.id === bookId);
   const storageKey = b?.r2Key || b?.r2_key;
 
-  // 3a. If book has a direct public CDN URL (validate it is a PDF and not an image cover)
-  if (b?.coverUrl && b.coverUrl.startsWith('http') && !b.coverUrl.match(/\.(jpe?g|png|webp|gif|svg)($|\?)/i)) {
+  // 4a. If book has a direct public CDN URL (validate it is a PDF and not an image cover or dead domain)
+  if (
+    b?.coverUrl &&
+    b.coverUrl.startsWith('http') &&
+    !b.coverUrl.includes('xiiemdxbdrlzpvhaecmt') &&
+    !b.coverUrl.match(/\.(jpe?g|png|webp|gif|svg)($|\?)/i)
+  ) {
     try {
       const resp = await fetch(b.coverUrl);
       if (resp.ok) {
@@ -844,8 +861,8 @@ export async function getBookFile(bookId) {
     }
   }
 
-  // 3b. Direct download from Supabase Storage client
-  if (storageKey && supabase) {
+  // 4b. Direct download from Supabase Storage client (only if validly configured)
+  if (storageKey && supabase && isSupabaseConfigured()) {
     try {
       const { data: blob, error: dlError } = await supabase.storage.from('reedshelf-books').download(storageKey);
       if (!dlError && blob) {
@@ -859,18 +876,6 @@ export async function getBookFile(bookId) {
     } catch (sbErr) {
       console.warn(`[Reader] Supabase direct download notice for book ${bookId}:`, sbErr.message);
     }
-  }
-
-  // 4. Try fetching from Backend stream endpoint
-  try {
-    const arrayBuffer = await api.books.getFileData(bookId);
-    if (arrayBuffer && arrayBuffer.byteLength > 0) {
-      memoryFileCache.set(bookId, arrayBuffer);
-      saveBookFile(bookId, arrayBuffer).catch(() => {});
-      return cloneFileData(arrayBuffer);
-    }
-  } catch (err) {
-    console.warn(`[Reader] Backend streaming notice for book ${bookId}:`, err.message);
   }
 
   return null;

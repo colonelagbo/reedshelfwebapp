@@ -30,6 +30,10 @@ const upload = multer({
 const uid = (prefix = 'book') => `${prefix}_${crypto.randomBytes(8).toString('hex')}_${Date.now()}`;
 
 function formatBookRow(b) {
+  let coverUrl = b.cover_url || b.coverUrl || null;
+  if (coverUrl && coverUrl.includes('xiiemdxbdrlzpvhaecmt')) {
+    coverUrl = `/api/books/${b.id}/file`;
+  }
   return {
     id: b.id,
     title: b.title,
@@ -41,7 +45,7 @@ function formatBookRow(b) {
     uploadedBy: b.uploaded_by || b.uploadedBy,
     r2Key: b.r2_key || b.r2Key,
     coverDataUrl: b.cover_data_url || b.coverDataUrl || null,
-    coverUrl: b.cover_url || b.coverUrl || null,
+    coverUrl,
     createdAt: b.created_at || b.createdAt,
   };
 }
@@ -69,21 +73,23 @@ booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
     }
 
     // 2. Cross-check Supabase PostgreSQL if configured
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        let query = supabase.from('books').select('file_size, uploaded_by');
-        if (!isUserAdmin) {
-          query = query.or(`uploaded_by.eq.${req.user.id},uploaded_by.eq.demo_user`);
+    if (config.isSupabaseConfigured()) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          let query = supabase.from('books').select('file_size, uploaded_by');
+          if (!isUserAdmin) {
+            query = query.or(`uploaded_by.eq.${req.user.id},uploaded_by.eq.demo_user`);
+          }
+          const { data, error } = await query;
+          if (!error && Array.isArray(data) && data.length > 0) {
+            const sbUsedBytes = data.reduce((sum, b) => sum + Number(b.file_size || 0), 0);
+            usedBytes = Math.max(usedBytes, sbUsedBytes);
+            totalBooks = Math.max(totalBooks, data.length);
+          }
+        } catch (sbErr) {
+          // Fallback to local database counts
         }
-        const { data, error } = await query;
-        if (!error && Array.isArray(data) && data.length > 0) {
-          const sbUsedBytes = data.reduce((sum, b) => sum + Number(b.file_size || 0), 0);
-          usedBytes = Math.max(usedBytes, sbUsedBytes);
-          totalBooks = Math.max(totalBooks, data.length);
-        }
-      } catch (sbErr) {
-        // Fallback to local database counts
       }
     }
 
@@ -116,8 +122,8 @@ booksRouter.get('/storage-config', optionalToken, async (req, res) => {
     const isConfigured = config.isSupabaseConfigured();
     res.json({
       configured: isConfigured,
-      url: config.supabase.url || 'https://xiiemdxbdrlzpvhaecmt.supabase.co',
-      key: config.supabase.key || '',
+      url: isConfigured ? config.supabase.url : '',
+      key: isConfigured ? config.supabase.key : '',
       bucketName: config.supabase.bucketName || 'reedshelf-books',
     });
   } catch (err) {
@@ -145,28 +151,31 @@ booksRouter.get('/', authenticateToken, async (req, res) => {
     }
 
     // 2. Fetch live books from Supabase PostgreSQL if configured and merge
-    if (supabase) {
-      try {
-        let query = supabase.from('books').select('*').order('created_at', { ascending: false });
-        if (!isUserAdmin) {
-          query = query.or(`uploaded_by.eq.${req.user.id},uploaded_by.eq.demo_user`);
-        }
-        const { data, error } = await query;
-        if (!error && Array.isArray(data) && data.length > 0) {
-          for (const b of data) {
-            try {
-              db.run(
-                `INSERT INTO books (id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(id) DO UPDATE SET title=excluded.title, author=excluded.author, file_size=excluded.file_size, total_pages=excluded.total_pages, r2_key=excluded.r2_key, cover_data_url=excluded.cover_data_url, cover_url=excluded.cover_url`,
-                [b.id, b.title, b.author, b.file_name, b.file_type || 'application/pdf', b.file_size || 0, b.total_pages || 0, b.uploaded_by, b.r2_key, b.cover_data_url || null, b.cover_url || null, b.created_at]
-              );
-            } catch {}
-            booksMap.set(b.id, formatBookRow(b));
+    if (config.isSupabaseConfigured()) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          let query = supabase.from('books').select('*').order('created_at', { ascending: false });
+          if (!isUserAdmin) {
+            query = query.or(`uploaded_by.eq.${req.user.id},uploaded_by.eq.demo_user`);
           }
+          const { data, error } = await query;
+          if (!error && Array.isArray(data) && data.length > 0) {
+            for (const b of data) {
+              try {
+                db.run(
+                  `INSERT INTO books (id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(id) DO UPDATE SET title=excluded.title, author=excluded.author, file_size=excluded.file_size, total_pages=excluded.total_pages, r2_key=excluded.r2_key, cover_data_url=excluded.cover_data_url, cover_url=excluded.cover_url`,
+                  [b.id, b.title, b.author, b.file_name, b.file_type || 'application/pdf', b.file_size || 0, b.total_pages || 0, b.uploaded_by, b.r2_key, b.cover_data_url || null, b.cover_url || null, b.created_at]
+                );
+              } catch {}
+              booksMap.set(b.id, formatBookRow(b));
+            }
+          }
+        } catch (sbErr) {
+          console.warn('[Supabase Books Fetch Notice]:', sbErr.message);
         }
-      } catch (sbErr) {
-        console.warn('[Supabase Books Fetch Notice]:', sbErr.message);
       }
     }
 
@@ -567,27 +576,68 @@ booksRouter.get('/:id/file', optionalToken, async (req, res) => {
     }
 
     // 2. Direct high-speed CDN redirect for Supabase Storage (zero serverless memory or latency)
-    if (storageKey) {
+    if (config.isSupabaseConfigured() && storageKey) {
       const client = getSupabaseClient();
       if (client) {
         const { data } = client.storage.from(config.supabase.bucketName).getPublicUrl(storageKey);
-        if (data?.publicUrl) {
+        if (data?.publicUrl && !data.publicUrl.includes('xiiemdxbdrlzpvhaecmt')) {
           return res.redirect(302, data.publicUrl);
         }
       }
     }
 
-    // 3. If book has direct coverUrl pointing to CDN, redirect
-    if (book.cover_url && book.cover_url.startsWith('http')) {
+    // 3. If book has direct coverUrl pointing to CDN, redirect (ensure it is not pointing to dead domain)
+    if (book.cover_url && book.cover_url.startsWith('http') && !book.cover_url.includes('xiiemdxbdrlzpvhaecmt') && !book.cover_url.match(/\.(jpe?g|png|webp|gif|svg)($|\?)/i)) {
       return res.redirect(302, book.cover_url);
     }
 
-    return res.status(404).json({ error: 'Book file not found on storage.' });
+    return res.status(404).json({ error: 'Book file not found on storage. Please re-attach the PDF.' });
   } catch (err) {
     console.error(`Error streaming book file ${req.params.id}:`, err.message);
     if (!res.headersSent) {
       res.status(500).json({ error: `Could not retrieve book file: ${err.message}` });
     }
+  }
+});
+
+// POST /api/books/:id/file - Upload / re-attach PDF file for an existing book
+booksRouter.post('/:id/file', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    const bookId = req.params.id;
+    const isUserAdmin = req.user.role === 'admin';
+    let book = isUserAdmin
+      ? db.get('SELECT * FROM books WHERE id = ?', [bookId])
+      : db.get('SELECT * FROM books WHERE id = ? AND (uploaded_by = ? OR uploaded_by = "demo_user")', [bookId, req.user.id]);
+
+    if (!book) {
+      return res.status(404).json({ error: 'Book not found or access denied.' });
+    }
+
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({ error: 'No PDF file provided.' });
+    }
+
+    const storageResult = await localStorageService.saveBookFile({
+      userId: book.uploaded_by || req.user.id,
+      bookId,
+      fileName: file.originalname || book.file_name || 'book.pdf',
+      buffer: file.buffer,
+      mimetype: file.mimetype || 'application/pdf',
+    });
+
+    const fileUrl = `/api/books/${bookId}/file`;
+    db.run(
+      'UPDATE books SET r2_key = ?, file_name = ?, file_size = ?, cover_url = ? WHERE id = ?',
+      [storageResult.storageKey, file.originalname || book.file_name, file.size, fileUrl, bookId]
+    );
+
+    const updated = db.get('SELECT * FROM books WHERE id = ?', [bookId]);
+    console.log(`[Reattach] Successfully attached PDF for book "${book.title}" (${bookId}) to disk: ${storageResult.storageKey}`);
+    res.json(formatBookRow(updated));
+  } catch (err) {
+    console.error('Error re-attaching book file:', err);
+    res.status(500).json({ error: `Failed to save book file: ${err.message}` });
   }
 });
 

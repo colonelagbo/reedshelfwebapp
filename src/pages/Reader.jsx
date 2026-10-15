@@ -163,19 +163,8 @@ export function Reader() {
         // ignore
       }
     }
-    // 3. React Router navigation: prefer history back, fallback to /app/library
-    if (window.history.state && window.history.state.idx > 0) {
-      navigate(-1);
-    } else {
-      navigate('/app/library', { replace: true });
-    }
-
-    // 4. Fallback in case React Router's transition is stalled while fullscreen is exiting
-    setTimeout(() => {
-      if (window.location.pathname.includes('/reader/')) {
-        window.location.href = '/app/library';
-      }
-    }, 250);
+    // 3. React Router navigation back to library
+    navigate('/app/library');
   }, [user, bookId, currentPage, navigate]);
 
   const handlePauseTillTomorrow = () => {
@@ -704,8 +693,24 @@ export function Reader() {
     const f = e.target.files?.[0];
     if (!f) return;
     try {
+      // 1. Immediately cache in IndexedDB/memory
       await saveBookFile(bookId, f);
       showToast('File updated. Loading book...');
+
+      // 2. Sync to server disk storage in background
+      try {
+        const formData = new FormData();
+        formData.append('file', f);
+        const token = localStorage.getItem('reedshelf_token_v1') || '';
+        await fetch(`/api/books/${bookId}/file`, {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        });
+      } catch (syncErr) {
+        console.warn('Could not sync repaired file to server disk:', syncErr);
+      }
+
       loadDocument();
     } catch (err) {
       console.error('Failed to repair file:', err);

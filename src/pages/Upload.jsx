@@ -16,7 +16,7 @@ import { useEffect } from 'react';
 import { AppShell } from '../components/AppShell';
 import { addBook, getCurrentUser, getUserStorageUsage, recordUploadedBook, saveBookFile, uploadBookFile, api } from '../lib/appStore';
 import { extractPdfInfo } from '../lib/pdfMetadata';
-import { supabase, isSupabaseConfigured, setSupabaseKey, DEFAULT_SUPABASE_URL } from '../lib/supabaseClient';
+import { supabase, isSupabaseConfigured, setSupabaseKey } from '../lib/supabaseClient';
 
 export function Upload() {
   const user = getCurrentUser();
@@ -30,9 +30,6 @@ export function Upload() {
   const [saving, setSaving] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [storage, setStorage] = useState(() => getUserStorageUsage(user?.id));
-  const [cloudConfigured, setCloudConfigured] = useState(() => isSupabaseConfigured());
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [keySaved, setKeySaved] = useState(false);
 
   useEffect(() => {
     const updateStorage = () => {
@@ -49,13 +46,8 @@ export function Upload() {
     api.books.getStorageConfig().then((cfg) => {
       if (cfg && cfg.configured && cfg.key) {
         setSupabaseKey(cfg.key, cfg.url);
-        setCloudConfigured(true);
       }
     }).catch(() => {});
-
-    const onConfigUpdate = () => setCloudConfigured(isSupabaseConfigured());
-    window.addEventListener('reedshelf:supabase_configured', onConfigUpdate);
-    return () => window.removeEventListener('reedshelf:supabase_configured', onConfigUpdate);
   }, []);
 
   const processFile = async (f) => {
@@ -210,25 +202,25 @@ export function Upload() {
         });
         recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
       } else if (supabase && isSupabaseConfigured()) {
-        const bookId = uploadPrep?.bookId || `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
-        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const storageKey = uploadPrep?.storageKey || `books/${currentUserId}/${bookId}/${safeName}`;
-
-        console.log(`[Upload] Uploading ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) to Supabase Storage...`);
-
-        const { error: uploadErr } = await supabase.storage
-          .from('reedshelf-books')
-          .upload(storageKey, file, { contentType: 'application/pdf', upsert: true });
-
-        if (uploadErr) {
-          throw new Error(`Cloud storage upload failed: ${uploadErr.message}`);
-        }
-
-        const { data: publicUrlData } = supabase.storage.from('reedshelf-books').getPublicUrl(storageKey);
-        const coverUrl = publicUrlData?.publicUrl || `/api/books/${bookId}/file`;
-
         try {
-          // Record book metadata in Supabase PostgreSQL & local DB
+          const bookId = uploadPrep?.bookId || `book_${crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : Date.now()}_${Date.now()}`;
+          const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const storageKey = uploadPrep?.storageKey || `books/${currentUserId}/${bookId}/${safeName}`;
+
+          console.log(`[Upload] Uploading ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) to Supabase Storage...`);
+
+          const { error: uploadErr } = await supabase.storage
+            .from('reedshelf-books')
+            .upload(storageKey, file, { contentType: 'application/pdf', upsert: true });
+
+          if (uploadErr) {
+            throw new Error(`Cloud storage upload failed: ${uploadErr.message}`);
+          }
+
+          const { data: publicUrlData } = supabase.storage.from('reedshelf-books').getPublicUrl(storageKey);
+          const coverUrl = publicUrlData?.publicUrl || `/api/books/${bookId}/file`;
+
+          // Record book metadata in database
           book = await api.books.recordBook({
             id: bookId,
             title,
@@ -245,49 +237,28 @@ export function Upload() {
             uploadedBy: currentUserId,
           });
           recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
-        } catch (recordErr) {
-          try {
-            await supabase.storage.from('reedshelf-books').remove([storageKey]);
-          } catch {
-            // ignore storage rollback error
-          }
-
-          const isNetworkOrOffline =
-            recordErr.message?.includes('Failed to fetch') ||
-            recordErr.message?.includes('NetworkError');
-
-          if (isNetworkOrOffline) {
-            book = addBook({
-              id: bookId,
-              title,
-              author,
-              fileName: file.name,
-              fileType: file.type || 'application/pdf',
-              size: file.size,
-              uploadedBy: currentUserId,
-              r2Key: storageKey,
-              totalPages,
-              coverDataUrl,
-              coverUrl,
-              storageType: 'supabase',
-            });
-          } else {
-            throw recordErr;
-          }
-        }
-      } else {
-        // Fallback for environments without Cloudflare R2 or Supabase configured
-        if (file.size > 4.5 * 1024 * 1024) {
-          throw new Error('This file exceeds 4.5 MB. Direct server upload on serverless platforms is limited to 4.5 MB. Please configure Cloudflare R2 or Supabase cloud storage.');
-        }
-
-        try {
+        } catch (cloudErr) {
+          console.warn('[Upload Warning] Supabase storage upload failed:', cloudErr.message, 'Falling back to direct server storage...');
+          // Fallback to local server storage
           book = await uploadBookFile(file, {
             title,
             author,
             totalPages,
             coverDataUrl,
           });
+          recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
+        }
+      } else {
+        // Direct Server Storage upload (supports up to 50 MB)
+        try {
+          console.log(`[Upload] Uploading ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB) to Server Storage...`);
+          book = await uploadBookFile(file, {
+            title,
+            author,
+            totalPages,
+            coverDataUrl,
+          });
+          recordUploadedBook({ ...book, uploadedBy: book?.uploadedBy || currentUserId });
         } catch (backendErr) {
           console.error('Upload error:', backendErr);
 
@@ -396,50 +367,6 @@ export function Upload() {
           onSubmit={handleSubmit}
           className="mt-4 rounded-3xl border border-[#e4e1d6] bg-white p-4 shadow-sm dark:border-white/10 dark:bg-[#12232a] sm:p-8"
         >
-          {file && file.size > 4.5 * 1024 * 1024 && !cloudConfigured && (
-            <div className="mb-5 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-200">
-              <div className="flex items-start gap-3">
-                <Sparkles className="mt-0.5 h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <div className="flex-1">
-                  <h3 className="text-sm font-bold">Cloud Storage Activation Needed</h3>
-                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
-                    This file is <strong>{(file.size / (1024 * 1024)).toFixed(1)} MB</strong>. Serverless platforms (Vercel) restrict direct uploads to 4.5 MB. To upload books up to your <strong>50 MB</strong> account quota, activate direct Supabase Cloud Storage below.
-                  </p>
-                  <div className="mt-3 flex flex-col sm:flex-row gap-2">
-                    <input
-                      type="password"
-                      value={apiKeyInput}
-                      onChange={(e) => setApiKeyInput(e.target.value)}
-                      placeholder="Paste your Supabase Key (sb_secret_...)"
-                      className="flex-1 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs text-[#0b1619] shadow-sm outline-none focus:border-[#009689] focus:ring-1 focus:ring-[#009689] dark:border-white/10 dark:bg-[#12232a] dark:text-white"
-                    />
-                    <button
-                      type="button"
-                      disabled={!apiKeyInput.trim()}
-                      onClick={() => {
-                        if (!apiKeyInput.trim()) return;
-                        setSupabaseKey(apiKeyInput.trim(), DEFAULT_SUPABASE_URL);
-                        setCloudConfigured(true);
-                        setKeySaved(true);
-                        setError('');
-                      }}
-                      className="rounded-xl bg-[#009689] px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-[#007f74] disabled:opacity-50 transition shrink-0"
-                    >
-                      Activate & Save
-                    </button>
-                  </div>
-                  {keySaved && (
-                    <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                      <CheckCircle2 size={14} /> Cloud storage activated! You can now click &ldquo;Upload book&rdquo; below.
-                    </p>
-                  )}
-                  <p className="mt-2 text-[11px] text-amber-700/80 dark:text-amber-400/80">
-                    💡 For permanent platform-wide setup, add <code className="font-mono bg-amber-200/60 dark:bg-white/10 px-1 py-0.5 rounded">VITE_SUPABASE_KEY</code> in your Vercel Project Environment Variables.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
 
           {error && (
             <div className="mb-5 flex items-start gap-2.5 rounded-xl bg-[#fff1ef] p-3.5 text-sm text-[#9b5147] dark:bg-[#3a1a17] dark:text-[#fca5a5]">

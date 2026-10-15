@@ -73,27 +73,53 @@ export const localStorageService = {
   },
 
   /**
+   * Search and resolve an existing filesystem path for a given storage key
+   */
+  resolveExistingPath(storageKey) {
+    if (!storageKey) return null;
+
+    // 1. Direct path check
+    const directPath = this.resolvePath(storageKey);
+    if (directPath && fs.existsSync(directPath)) {
+      return directPath;
+    }
+
+    // 2. Check flat filename in root uploads directory
+    const flatName = path.basename(storageKey);
+    const altPath = path.join(uploadsDir, flatName);
+    if (fs.existsSync(altPath)) {
+      return altPath;
+    }
+
+    // 3. Check flat filename in uploads/books directory
+    const booksFlatPath = path.join(uploadsDir, 'books', flatName);
+    if (fs.existsSync(booksFlatPath)) {
+      return booksFlatPath;
+    }
+
+    // 4. Check if stored with underscores
+    const underscorePath = path.join(uploadsDir, storageKey.replace(/\//g, '_'));
+    if (fs.existsSync(underscorePath)) {
+      return underscorePath;
+    }
+
+    // 5. Check if stored under uploads/books with underscores
+    const cleanKey = storageKey.replace(/^uploads[/\\]/, '');
+    const booksUnderscorePath = path.join(uploadsDir, 'books', cleanKey.replace(/\//g, '_'));
+    if (fs.existsSync(booksUnderscorePath)) {
+      return booksUnderscorePath;
+    }
+
+    return null;
+  },
+
+  /**
    * Get file stream with HTTP 206 Range support for fast PDF page rendering
    */
   async getStream(storageKey, rangeHeader) {
-    const filePath = this.resolvePath(storageKey);
-    let resolved = filePath;
-
-    if (!resolved || !fs.existsSync(resolved)) {
-      // Check if it exists as flat file in uploads dir
-      const flatName = path.basename(storageKey || '');
-      const altPath = path.join(uploadsDir, flatName);
-      if (fs.existsSync(altPath)) {
-        resolved = altPath;
-      } else {
-        // Also check if stored with underscores
-        const underscorePath = path.join(uploadsDir, (storageKey || '').replace(/\//g, '_'));
-        if (fs.existsSync(underscorePath)) {
-          resolved = underscorePath;
-        } else {
-          throw new Error(`Book file not found on server disk: ${storageKey}`);
-        }
-      }
+    const resolved = this.resolveExistingPath(storageKey);
+    if (!resolved) {
+      throw new Error(`Book file not found on server disk: ${storageKey}`);
     }
 
     const stat = await fs.promises.stat(resolved);
@@ -142,10 +168,10 @@ export const localStorageService = {
    */
   async deleteBookFile(storageKey) {
     try {
-      const filePath = this.resolvePath(storageKey);
-      if (filePath && fs.existsSync(filePath)) {
-        await fs.promises.unlink(filePath);
-        console.log(`[LocalStorage] Deleted book file from disk: ${filePath}`);
+      const resolved = this.resolveExistingPath(storageKey);
+      if (resolved && fs.existsSync(resolved)) {
+        await fs.promises.unlink(resolved);
+        console.log(`[LocalStorage] Deleted book file from disk: ${resolved}`);
         return true;
       }
     } catch (err) {
@@ -158,7 +184,6 @@ export const localStorageService = {
    * Check if file exists on disk
    */
   fileExists(storageKey) {
-    const filePath = this.resolvePath(storageKey);
-    return Boolean(filePath && fs.existsSync(filePath));
+    return Boolean(this.resolveExistingPath(storageKey));
   }
 };
