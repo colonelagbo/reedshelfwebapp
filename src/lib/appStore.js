@@ -251,15 +251,30 @@ export function getDeletedBookIds() {
 export async function fetchBooks() {
   const user = getCurrentUser();
   const deletedSet = new Set(getDeletedBookIds());
+  const localBooks = getBooks();
 
   // 1. Try fetching from Backend API
   try {
     const books = await api.books.list();
     if (Array.isArray(books)) {
       const cleanBooks = books.filter((b) => b && b.id && !deletedSet.has(b.id) && !isTestBook(b));
-      write(BOOKS_KEY, cleanBooks);
+
+      // Merge remote books with existing local cache so newly recorded uploads never disappear
+      const bookMap = new Map();
+      for (const b of localBooks) {
+        if (b && b.id && !deletedSet.has(b.id) && !isTestBook(b)) {
+          bookMap.set(b.id, b);
+        }
+      }
+      for (const b of cleanBooks) {
+        bookMap.set(b.id, b);
+      }
+      const merged = Array.from(bookMap.values()).sort(
+        (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+      );
+      write(BOOKS_KEY, merged);
       notifyBooksChanged();
-      return cleanBooks;
+      return merged;
     }
   } catch (err) {
     console.warn('Could not fetch books from backend API, checking Supabase direct:', err.message);
@@ -276,8 +291,14 @@ export async function fetchBooks() {
         const { data, error } = await query.order('created_at', { ascending: false });
 
         if (!error && Array.isArray(data) && data.length > 0) {
-          const clean = data
-            .map((b) => ({
+          const bookMap = new Map();
+          for (const b of localBooks) {
+            if (b && b.id && !deletedSet.has(b.id) && !isTestBook(b)) {
+              bookMap.set(b.id, b);
+            }
+          }
+          for (const b of data) {
+            const formatted = {
               id: b.id,
               title: b.title,
               author: b.author,
@@ -290,8 +311,14 @@ export async function fetchBooks() {
               coverDataUrl: b.cover_data_url,
               coverUrl: b.cover_url,
               createdAt: b.created_at,
-            }))
-            .filter((b) => !deletedSet.has(b.id) && !isTestBook(b));
+            };
+            if (!deletedSet.has(formatted.id) && !isTestBook(formatted)) {
+              bookMap.set(formatted.id, formatted);
+            }
+          }
+          const clean = Array.from(bookMap.values()).sort(
+            (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+          );
           write(BOOKS_KEY, clean);
           notifyBooksChanged();
           return clean;

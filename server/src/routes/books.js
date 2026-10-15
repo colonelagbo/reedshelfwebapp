@@ -6,7 +6,7 @@ import { localStorageService } from '../storage/localStorage.js';
 import { r2Storage } from '../storage/r2.js';
 import { supabaseStorage, getSupabaseClient } from '../storage/supabase.js';
 import { authenticateToken, optionalToken } from '../middleware/auth.js';
-import { recordBook, removeBookFromCloud } from '../storage/cloudSync.js';
+import { recordBook, removeBookFromCloud, syncBooksFromCloud } from '../storage/cloudSync.js';
 import { config } from '../config.js';
 
 export const booksRouter = express.Router();
@@ -90,6 +90,24 @@ booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
       }
     }
 
+    // 3. Cross-check persistent bucket metadata
+    try {
+      const cloudMetadata = await supabaseStorage.getMetadata('books.json');
+      if (Array.isArray(cloudMetadata)) {
+        let metaUsed = 0;
+        let metaCount = 0;
+        for (const b of cloudMetadata) {
+          const owner = b.uploadedBy || b.uploaded_by;
+          if (isUserAdmin || owner === req.user.id) {
+            metaUsed += Number(b.size || b.file_size || 0);
+            metaCount++;
+          }
+        }
+        usedBytes = Math.max(usedBytes, metaUsed);
+        totalBooks = Math.max(totalBooks, metaCount);
+      }
+    } catch {}
+
     const maxBytes = ACCOUNT_STORAGE_LIMIT_BYTES;
     const remainingBytes = Math.max(0, maxBytes - usedBytes);
     const usedMB = Number((usedBytes / (1024 * 1024)).toFixed(2));
@@ -134,7 +152,14 @@ booksRouter.get('/', authenticateToken, async (req, res) => {
     const isUserAdmin = req.user.role === 'admin';
     const supabase = getSupabaseClient();
 
-    // 1. Fetch local books first (authoritative fallback that preserves all uploaded books)
+    // 1. Synchronize from cloud storage metadata (ensures serverless lambdas never start blank)
+    try {
+      await syncBooksFromCloud();
+    } catch (syncErr) {
+      console.warn('[SyncBooks Notice]:', syncErr.message);
+    }
+
+    // 2. Fetch local books (authoritative fallback that preserves all uploaded books)
     const localBooks = isUserAdmin
       ? db.all('SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books ORDER BY created_at DESC')
       : db.all(
@@ -147,7 +172,24 @@ booksRouter.get('/', authenticateToken, async (req, res) => {
       booksMap.set(b.id, formatBookRow(b));
     }
 
-    // 2. Fetch live books from Supabase PostgreSQL if configured and merge
+    // 3. Ingest directly from Supabase Storage metadata/books.json as persistent cloud bucket backup
+    try {
+      const cloudMetadata = await supabaseStorage.getMetadata('books.json');
+      if (Array.isArray(cloudMetadata)) {
+        for (const b of cloudMetadata) {
+          const owner = b.uploadedBy || b.uploaded_by;
+          if (isUserAdmin || owner === req.user.id || owner === 'demo_user' || !owner) {
+            if (!booksMap.has(b.id)) {
+              booksMap.set(b.id, formatBookRow(b));
+            }
+          }
+        }
+      }
+    } catch (metaErr) {
+      console.warn('[Supabase Storage Metadata Notice]:', metaErr.message);
+    }
+
+    // 4. Fetch live books from Supabase PostgreSQL if configured and merge
     if (config.isSupabaseConfigured()) {
       const supabase = getSupabaseClient();
       if (supabase) {
@@ -416,6 +458,13 @@ booksRouter.post('/upload', authenticateToken, upload.single('file'), async (req
       createdAt,
     };
 
+    // Persist book metadata to cloud storage bucket
+    try {
+      await recordBook(savedBook);
+    } catch (e) {
+      console.warn('[Cloud Metadata Record Error]:', e.message);
+    }
+
     console.log(`[Upload] Successfully stored book "${bookTitle}" locally with ID ${bookId}`);
     res.status(201).json(savedBook);
   } catch (err) {
@@ -527,6 +576,12 @@ booksRouter.post('/record', authenticateToken, async (req, res) => {
       } catch (sbErr) {
         console.warn('[Supabase Sync Warning] Could not sync to Supabase table:', sbErr.message);
       }
+    }
+
+    try {
+      await recordBook(savedBook);
+    } catch (e) {
+      console.warn('[Cloud Metadata Record Error]:', e.message);
     }
 
     console.log(`[Record] Successfully recorded book "${bookTitle}" (${(fileSize / (1024 * 1024)).toFixed(2)} MB) for user ${req.user.id}`);
@@ -780,6 +835,11 @@ booksRouter.delete('/:id', authenticateToken, async (req, res) => {
         await supabase.from('books').delete().eq('id', bookId);
       } catch {}
     }
+
+    // 4. Remove from cloud bucket metadata
+    try {
+      await removeBookFromCloud(bookId);
+    } catch {}
 
     console.log(`[Delete] Successfully deleted book ${bookId} ("${book.title}") from local storage and database`);
     res.json({ message: 'Book and all associated data deleted successfully.' });
