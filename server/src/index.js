@@ -10,8 +10,13 @@ import { settingsRouter } from './routes/settings.js';
 import { healthRouter } from './routes/health.js';
 import { adminRouter } from './routes/admin.js';
 import { authenticateToken } from './middleware/auth.js';
+import { syncUsersFromCloud, syncBooksFromCloud } from './storage/cloudSync.js';
 
 const app = express();
+
+// Initial cloud synchronization on startup
+syncUsersFromCloud().catch(() => {});
+syncBooksFromCloud().catch(() => {});
 
 // Middleware
 app.use(cors({

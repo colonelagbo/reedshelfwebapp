@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { db } from '../db.js';
 import { getSupabaseClient } from '../storage/supabase.js';
+import { syncUsersFromCloud } from '../storage/cloudSync.js';
 
 export async function authenticateToken(req, res, next) {
   // Extract token from header or query param
@@ -24,6 +25,15 @@ export async function authenticateToken(req, res, next) {
     let user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [payload.id]);
     if (!user && payload.email) {
       user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE LOWER(email) = ?', [payload.email.toLowerCase()]);
+    }
+
+    // In serverless cold starts or multi-instance environments, fetch latest users from cloud
+    if (!user) {
+      await syncUsersFromCloud().catch(() => {});
+      user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [payload.id]);
+      if (!user && payload.email) {
+        user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE LOWER(email) = ?', [payload.email.toLowerCase()]);
+      }
     }
 
     // In serverless environments, if a new container started up and doesn't have the user cached yet,
@@ -125,6 +135,13 @@ export async function optionalToken(req, res, next) {
       let user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [payload.id]);
       if (!user && payload.email) {
         user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE LOWER(email) = ?', [payload.email.toLowerCase()]);
+      }
+      if (!user) {
+        await syncUsersFromCloud().catch(() => {});
+        user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [payload.id]);
+        if (!user && payload.email) {
+          user = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE LOWER(email) = ?', [payload.email.toLowerCase()]);
+        }
       }
       if (user && user.status !== 'suspended') {
         req.user = user;

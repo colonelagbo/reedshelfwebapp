@@ -23,10 +23,14 @@ export async function syncUsersFromCloud(force = false) {
 
     let needsCloudUpdate = false;
 
-    // 1. Ingest cloud users into local database
+    // 1. Ingest cloud users from metadata/users.json into local database
     if (Array.isArray(cloudUsers)) {
       for (const u of cloudUsers) {
-        if (!localUserMap.has(u.id)) {
+        if (!u || !u.id || !u.email) continue;
+        const normalizedEmail = (u.email || '').trim().toLowerCase();
+        const existingLocal = localUserMap.get(u.id) || localUsers.find(lu => (lu.email || '').toLowerCase() === normalizedEmail);
+
+        if (!existingLocal) {
           try {
             db.run(
               `INSERT INTO users (
@@ -35,13 +39,13 @@ export async function syncUsersFromCloud(force = false) {
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               [
                 u.id,
-                u.name,
-                u.email,
+                u.name || 'Reader',
+                normalizedEmail,
                 u.password || '',
                 u.avatar || null,
                 u.role || 'user',
                 u.status || 'active',
-                u.created_at || new Date().toISOString(),
+                u.created_at || u.createdAt || new Date().toISOString(),
                 u.two_factor_enabled ? 1 : 0,
                 u.two_factor_secret || null,
                 u.google_id || null,
@@ -52,34 +56,101 @@ export async function syncUsersFromCloud(force = false) {
             // Ignore collision
           }
         } else {
-          // If cloud has an updated avatar or name, sync to local SQLite
-          const localUser = localUserMap.get(u.id);
-          if (localUser) {
-            if (u.avatar !== undefined && u.avatar !== localUser.avatar) {
-              db.run('UPDATE users SET avatar = ? WHERE id = ?', [u.avatar || null, u.id]);
-              localUser.avatar = u.avatar;
-            }
-            if (u.name && u.name !== localUser.name) {
-              db.run('UPDATE users SET name = ? WHERE id = ?', [u.name, u.id]);
-              localUser.name = u.name;
-            }
+          // If cloud has an updated avatar, name, or password, sync to local SQLite
+          if (u.avatar !== undefined && u.avatar !== existingLocal.avatar) {
+            db.run('UPDATE users SET avatar = ? WHERE id = ?', [u.avatar || null, existingLocal.id]);
+            existingLocal.avatar = u.avatar;
+          }
+          if (u.name && u.name !== existingLocal.name) {
+            db.run('UPDATE users SET name = ? WHERE id = ?', [u.name, existingLocal.id]);
+            existingLocal.name = u.name;
+          }
+          if (u.password && u.password !== existingLocal.password) {
+            db.run('UPDATE users SET password = ? WHERE id = ?', [u.password, existingLocal.id]);
+            existingLocal.password = u.password;
           }
         }
       }
     }
 
-    // 2. Export any local users to cloud map
+    // 2. Also check Supabase PostgreSQL public.users table to catch any users stored there
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data: sbUsers, error: sbErr } = await supabase.from('users').select('*');
+        if (!sbErr && Array.isArray(sbUsers)) {
+          for (const sbu of sbUsers) {
+            if (!sbu || !sbu.id || !sbu.email) continue;
+            const sbEmail = (sbu.email || '').trim().toLowerCase();
+            const existingInCloud = cloudUserMap.get(sbu.id) || Array.from(cloudUserMap.values()).find(x => (x.email || '').toLowerCase() === sbEmail);
+
+            if (!existingInCloud) {
+              const uObj = {
+                id: sbu.id,
+                name: sbu.name || 'Reader',
+                email: sbEmail,
+                password: sbu.password || '',
+                avatar: sbu.avatar || null,
+                role: sbu.role || 'user',
+                status: sbu.status || 'active',
+                created_at: sbu.created_at || new Date().toISOString(),
+                createdAt: sbu.created_at || new Date().toISOString(),
+                two_factor_enabled: false,
+                two_factor_secret: null,
+                google_id: null,
+              };
+              cloudUserMap.set(sbu.id, uObj);
+              needsCloudUpdate = true;
+            }
+
+            const existingLocal = localUserMap.get(sbu.id) || localUsers.find(lu => (lu.email || '').toLowerCase() === sbEmail);
+            if (!existingLocal) {
+              try {
+                db.run(
+                  `INSERT INTO users (
+                    id, name, email, password, avatar, role, status,
+                    created_at, two_factor_enabled, two_factor_secret, google_id
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  [
+                    sbu.id,
+                    sbu.name || 'Reader',
+                    sbEmail,
+                    sbu.password || (existingInCloud?.password || ''),
+                    sbu.avatar || null,
+                    sbu.role || 'user',
+                    sbu.status || 'active',
+                    sbu.created_at || new Date().toISOString(),
+                    0,
+                    null,
+                    null,
+                  ]
+                );
+                localUserMap.set(sbu.id, sbu);
+              } catch {}
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[CloudSync] Postgres users fetch notice:', err.message);
+      }
+    }
+
+    // 3. Export any local users to cloud map if not already present
     for (const u of localUsers) {
-      if (!cloudUserMap.has(u.id)) {
+      if (!u || !u.id || !u.email) continue;
+      const uEmail = (u.email || '').trim().toLowerCase();
+      const existingInCloud = cloudUserMap.get(u.id) || Array.from(cloudUserMap.values()).find(x => (x.email || '').toLowerCase() === uEmail);
+      if (!existingInCloud) {
         cloudUserMap.set(u.id, {
           id: u.id,
           name: u.name,
-          email: u.email,
+          email: uEmail,
           password: u.password,
           avatar: u.avatar,
           role: u.role,
           status: u.status,
-          created_at: u.created_at,
+          created_at: u.created_at || new Date().toISOString(),
+          createdAt: u.created_at || new Date().toISOString(),
           two_factor_enabled: Boolean(u.two_factor_enabled),
           two_factor_secret: u.two_factor_secret,
           google_id: u.google_id,
@@ -88,30 +159,30 @@ export async function syncUsersFromCloud(force = false) {
       }
     }
 
-    // 3. Save merged list back to Supabase Storage if any new local users were found
+    // 4. Save merged list back to Supabase Storage users.json
     if (needsCloudUpdate || (Array.isArray(cloudUsers) && cloudUsers.length < cloudUserMap.size)) {
       const merged = Array.from(cloudUserMap.values());
       await supabaseStorage.saveMetadata('users.json', merged);
     }
 
-    // 4. Try syncing with Supabase PostgreSQL public.users if table exists
-    const supabase = getSupabaseClient();
+    // 5. Upsert to Supabase PostgreSQL public.users with password and conflict resolution
     if (supabase) {
       try {
         const usersToUpsert = Array.from(cloudUserMap.values()).map((u) => ({
           id: u.id,
           name: u.name || 'Reader',
-          email: u.email,
+          email: (u.email || '').trim().toLowerCase(),
+          password: u.password || null,
           avatar: u.avatar || null,
           role: u.role || 'user',
           status: u.status || 'active',
-          created_at: u.created_at || new Date().toISOString(),
+          created_at: u.created_at || u.createdAt || new Date().toISOString(),
         }));
         if (usersToUpsert.length > 0) {
-          await supabase.from('users').upsert(usersToUpsert, { onConflict: 'id' });
+          await supabase.from('users').upsert(usersToUpsert, { onConflict: 'email' });
         }
       } catch {
-        // Table may not exist yet
+        // Table or constraint may vary
       }
     }
   } catch (err) {
@@ -126,26 +197,81 @@ export async function syncUsersFromCloud(force = false) {
  */
 export async function recordUser(user) {
   try {
-    const cloudUsers = (await supabaseStorage.getMetadata('users.json')) || [];
-    const filtered = cloudUsers.filter((u) => u.id !== user.id && u.email.toLowerCase() !== user.email.toLowerCase());
-    filtered.push(user);
-    await supabaseStorage.saveMetadata('users.json', filtered);
+    const userEmail = (user.email || '').trim().toLowerCase();
+    const normalized = {
+      id: user.id,
+      name: (user.name || 'Reader').trim(),
+      email: userEmail,
+      password: user.password || '',
+      avatar: user.avatar || null,
+      role: user.role || 'user',
+      status: user.status || 'active',
+      two_factor_enabled: Boolean(user.two_factor_enabled || user.twoFactorEnabled),
+      two_factor_secret: user.two_factor_secret || null,
+      google_id: user.google_id || null,
+      created_at: user.created_at || user.createdAt || new Date().toISOString(),
+      createdAt: user.createdAt || user.created_at || new Date().toISOString(),
+    };
 
+    // 1. Save directly into Supabase Storage persistent metadata/users.json
+    const cloudUsers = (await supabaseStorage.getMetadata('users.json')) || [];
+    const filtered = cloudUsers.filter(
+      (u) => u && u.id !== normalized.id && (u.email || '').trim().toLowerCase() !== userEmail
+    );
+    filtered.unshift(normalized);
+    await supabaseStorage.saveMetadata('users.json', filtered);
+    console.log(`[CloudSync] Successfully saved user ${userEmail} (${normalized.id}) to users.json`);
+
+    // 2. Also save to Supabase PostgreSQL public.users table with hashed password
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        await supabase.from('users').upsert({
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          avatar: user.avatar || null,
-          role: user.role || 'user',
-          status: user.status || 'active',
-          created_at: user.created_at,
-        }, { onConflict: 'id' });
-      } catch {
-        // Safe if table not yet migrated
+        const { error: upsertErr } = await supabase.from('users').upsert({
+          id: normalized.id,
+          name: normalized.name,
+          email: normalized.email,
+          password: normalized.password || null,
+          avatar: normalized.avatar || null,
+          role: normalized.role || 'user',
+          status: normalized.status || 'active',
+          created_at: normalized.created_at,
+        }, { onConflict: 'email' });
+        if (upsertErr) {
+          console.warn('[CloudSync] Supabase DB upsert notice:', upsertErr.message);
+        }
+      } catch (dbErr) {
+        console.warn('[CloudSync] Supabase DB exception:', dbErr.message);
       }
+    }
+
+    // 3. Ensure user is in local database cache
+    try {
+      db.run(
+        `INSERT INTO users (
+          id, name, email, password, avatar, role, status,
+          created_at, two_factor_enabled, two_factor_secret, google_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          normalized.id,
+          normalized.name,
+          normalized.email,
+          normalized.password,
+          normalized.avatar,
+          normalized.role,
+          normalized.status,
+          normalized.created_at,
+          normalized.two_factor_enabled ? 1 : 0,
+          normalized.two_factor_secret,
+          normalized.google_id,
+        ]
+      );
+    } catch {
+      try {
+        db.run(
+          'UPDATE users SET name = ?, email = ?, password = ?, avatar = ?, role = ?, status = ? WHERE id = ?',
+          [normalized.name, normalized.email, normalized.password, normalized.avatar, normalized.role, normalized.status, normalized.id]
+        );
+      } catch {}
     }
   } catch (err) {
     console.warn('[CloudSync] recordUser notice:', err.message);

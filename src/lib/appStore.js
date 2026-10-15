@@ -50,6 +50,17 @@ export async function registerUser({ name, email, password, code, setup2FA }) {
   if (res.user?.id) {
     localStorage.setItem(SESSION_KEY, res.user.id);
     authStorage.setUser(res.user);
+    const users = getUsers();
+    const existingIndex = users.findIndex(
+      (u) => u.id === res.user.id || (u.email || '').toLowerCase() === (res.user.email || '').toLowerCase()
+    );
+    const userToCache = { ...res.user, password };
+    if (existingIndex >= 0) {
+      users[existingIndex] = userToCache;
+    } else {
+      users.unshift(userToCache);
+    }
+    write(USERS_KEY, users);
   }
   return res.user;
 }
@@ -59,6 +70,21 @@ export async function loginUser({ email, password }) {
     const res = await api.auth.login({ email, password });
     if (res.require2FA) {
       return res; // Signal that 2FA Authenticator code is needed
+    }
+    if (res.user?.id) {
+      localStorage.setItem(SESSION_KEY, res.user.id);
+      authStorage.setUser(res.user);
+      const users = getUsers();
+      const existingIndex = users.findIndex(
+        (u) => u.id === res.user.id || (u.email || '').toLowerCase() === (res.user.email || '').toLowerCase()
+      );
+      const userToCache = { ...res.user, password };
+      if (existingIndex >= 0) {
+        users[existingIndex] = userToCache;
+      } else {
+        users.unshift(userToCache);
+      }
+      write(USERS_KEY, users);
     }
     return res.user;
   } catch (err) {
@@ -78,6 +104,20 @@ export async function loginWithGoogle({ email, name, avatar, googleId }) {
     const res = await api.auth.google({ email, name, avatar, googleId });
     if (res.require2FA) {
       return res;
+    }
+    if (res.user?.id) {
+      localStorage.setItem(SESSION_KEY, res.user.id);
+      authStorage.setUser(res.user);
+      const users = getUsers();
+      const existingIndex = users.findIndex(
+        (u) => u.id === res.user.id || (u.email || '').toLowerCase() === (res.user.email || '').toLowerCase()
+      );
+      if (existingIndex >= 0) {
+        users[existingIndex] = { ...users[existingIndex], ...res.user };
+      } else {
+        users.unshift(res.user);
+      }
+      write(USERS_KEY, users);
     }
     return res.user;
   } catch (err) {
@@ -105,6 +145,20 @@ export async function loginWithGoogle({ email, name, avatar, googleId }) {
 
 export async function verify2FALogin({ tempToken, code }) {
   const res = await api.auth.verify2FA({ tempToken, code });
+  if (res.user?.id) {
+    localStorage.setItem(SESSION_KEY, res.user.id);
+    authStorage.setUser(res.user);
+    const users = getUsers();
+    const existingIndex = users.findIndex(
+      (u) => u.id === res.user.id || (u.email || '').toLowerCase() === (res.user.email || '').toLowerCase()
+    );
+    if (existingIndex >= 0) {
+      users[existingIndex] = { ...users[existingIndex], ...res.user };
+    } else {
+      users.unshift(res.user);
+    }
+    write(USERS_KEY, users);
+  }
   return res.user;
 }
 
@@ -116,6 +170,12 @@ export function logoutUser() {
 export async function updateUser(userId, changes) {
   try {
     const user = await api.auth.updateProfile(changes);
+    const users = getUsers();
+    const existingIndex = users.findIndex((u) => u.id === userId);
+    if (existingIndex >= 0) {
+      users[existingIndex] = { ...users[existingIndex], ...user };
+      write(USERS_KEY, users);
+    }
     return user;
   } catch (err) {
     const users = getUsers().map((u) => (u.id === userId ? { ...u, ...changes } : u));
@@ -129,6 +189,15 @@ export async function updateUser(userId, changes) {
 export async function uploadAvatar(file) {
   try {
     const res = await api.auth.uploadAvatar(file);
+    if (res.user) {
+      authStorage.setUser(res.user);
+      const users = getUsers();
+      const existingIndex = users.findIndex((u) => u.id === res.user.id);
+      if (existingIndex >= 0) {
+        users[existingIndex] = { ...users[existingIndex], ...res.user };
+        write(USERS_KEY, users);
+      }
+    }
     return res.user;
   } catch (err) {
     console.error('Failed to upload avatar to cloud:', err);
@@ -139,6 +208,15 @@ export async function uploadAvatar(file) {
 export async function removeAvatar() {
   try {
     const user = await api.auth.removeAvatar();
+    if (user) {
+      authStorage.setUser(user);
+      const users = getUsers();
+      const existingIndex = users.findIndex((u) => u.id === user.id);
+      if (existingIndex >= 0) {
+        users[existingIndex] = { ...users[existingIndex], ...user };
+        write(USERS_KEY, users);
+      }
+    }
     return user;
   } catch (err) {
     console.error('Failed to remove avatar:', err);

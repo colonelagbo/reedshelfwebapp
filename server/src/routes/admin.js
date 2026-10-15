@@ -463,7 +463,7 @@ adminRouter.get('/users/:id', (req, res) => {
 // ============================================================================
 // 6. PUT /api/admin/users/:id/status (Suspend / Reactivate User)
 // ============================================================================
-adminRouter.put('/users/:id/status', (req, res) => {
+adminRouter.put('/users/:id/status', async (req, res) => {
   try {
     const targetId = req.params.id;
     const { status, reason } = req.body;
@@ -491,6 +491,10 @@ adminRouter.put('/users/:id/status', (req, res) => {
     }
 
     db.run('UPDATE users SET status = ? WHERE id = ?', [status, targetId]);
+    const updatedStatusUser = db.get('SELECT * FROM users WHERE id = ?', [targetId]);
+    if (updatedStatusUser) {
+      await recordUser(updatedStatusUser);
+    }
 
     logAudit(req.user, status === 'suspended' ? 'user.suspend' : 'user.reactivate', {
       targetType: 'user',
@@ -513,7 +517,7 @@ adminRouter.put('/users/:id/status', (req, res) => {
 // ============================================================================
 // 7. PUT /api/admin/users/:id/role (Promote / Demote User Role)
 // ============================================================================
-adminRouter.put('/users/:id/role', (req, res) => {
+adminRouter.put('/users/:id/role', async (req, res) => {
   try {
     const targetId = req.params.id;
     const { role } = req.body;
@@ -541,6 +545,10 @@ adminRouter.put('/users/:id/role', (req, res) => {
     }
 
     db.run('UPDATE users SET role = ? WHERE id = ?', [role, targetId]);
+    const updatedRoleUser = db.get('SELECT * FROM users WHERE id = ?', [targetId]);
+    if (updatedRoleUser) {
+      await recordUser(updatedRoleUser);
+    }
 
     logAudit(req.user, 'user.role_change', {
       targetType: 'user',
@@ -884,7 +892,7 @@ adminRouter.get('/audit-logs', (req, res) => {
 // ============================================================================
 // 13. POST /api/admin/setup-first-admin
 // ============================================================================
-adminRouter.post('/setup-first-admin', (req, res) => {
+adminRouter.post('/setup-first-admin', async (req, res) => {
   try {
     const adminCountRow = db.get("SELECT COUNT(*) as count FROM users WHERE role = 'admin'");
     const adminCount = adminCountRow?.count || 0;
@@ -896,6 +904,10 @@ adminRouter.post('/setup-first-admin', (req, res) => {
     }
 
     db.run("UPDATE users SET role = 'admin' WHERE id = ?", [req.user.id]);
+    const updatedAdmin = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (updatedAdmin) {
+      await recordUser(updatedAdmin);
+    }
 
     logAudit(req.user, 'admin.claim_initial', {
       targetType: 'user',

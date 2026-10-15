@@ -5,7 +5,7 @@ import crypto from 'crypto';
 import { db } from '../db.js';
 import { config } from '../config.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { recordUser } from '../storage/cloudSync.js';
+import { recordUser, syncUsersFromCloud } from '../storage/cloudSync.js';
 import {
   generateSecret,
   verifyTOTP,
@@ -82,8 +82,9 @@ authRouter.post('/send-verification', async (req, res) => {
       return res.status(403).json({ error: 'New user registrations are currently disabled by the administrator.' });
     }
 
-    // Check if an account already exists with this email
-    const existing = db.get('SELECT id FROM users WHERE email = ?', [trimmedEmail]);
+    // Check if an account already exists with this email (syncing from cloud first)
+    await syncUsersFromCloud().catch(() => {});
+    const existing = db.get('SELECT id FROM users WHERE LOWER(email) = ?', [trimmedEmail]);
     if (existing) {
       return res.status(400).json({ error: 'An account with this email already exists. Please sign in instead.' });
     }
@@ -156,7 +157,9 @@ authRouter.post('/register', async (req, res) => {
       return res.status(403).json({ error: 'New user registrations are currently disabled by the administrator.' });
     }
 
-    const existing = db.get('SELECT id FROM users WHERE email = ?', [trimmedEmail]);
+    // Check if user already exists (syncing from cloud first)
+    await syncUsersFromCloud().catch(() => {});
+    const existing = db.get('SELECT id FROM users WHERE LOWER(email) = ?', [trimmedEmail]);
     if (existing) {
       return res.status(400).json({ error: 'An account with this email already exists.' });
     }
@@ -214,6 +217,8 @@ authRouter.post('/register', async (req, res) => {
       password: hashedPassword,
       two_factor_enabled: twoFactorEnabled,
       two_factor_secret: twoFactorSecret,
+      created_at: createdAt,
+      createdAt,
     });
 
     const token = generateToken(user);
@@ -234,7 +239,17 @@ authRouter.post('/login', async (req, res) => {
     }
 
     const trimmedEmail = email.trim().toLowerCase();
-    const user = db.get('SELECT * FROM users WHERE email = ?', [trimmedEmail]);
+
+    // Ensure local database is up to date with cloud storage
+    await syncUsersFromCloud().catch(() => {});
+
+    let user = db.get('SELECT * FROM users WHERE LOWER(email) = ?', [trimmedEmail]);
+
+    if (!user) {
+      // Force immediate sync from Supabase if not found initially
+      await syncUsersFromCloud(true).catch(() => {});
+      user = db.get('SELECT * FROM users WHERE LOWER(email) = ?', [trimmedEmail]);
+    }
 
     if (!user) {
       return res.status(401).json({ error: 'Incorrect email or password.' });
@@ -317,21 +332,32 @@ authRouter.post('/google', async (req, res) => {
     const displayName = (name && name.trim()) || trimmedEmail.split('@')[0] || 'Google User';
     const cleanGoogleId = googleId ? String(googleId).trim() : `google_${Date.now()}`;
 
-    let user = db.get('SELECT * FROM users WHERE email = ?', [trimmedEmail]);
+    // Ensure database is up to date before querying
+    await syncUsersFromCloud().catch(() => {});
+    let user = db.get('SELECT * FROM users WHERE LOWER(email) = ?', [trimmedEmail]);
+
+    if (!user) {
+      // Force immediate sync from Supabase if not found initially
+      await syncUsersFromCloud(true).catch(() => {});
+      user = db.get('SELECT * FROM users WHERE LOWER(email) = ?', [trimmedEmail]);
+    }
 
     if (user) {
       if (user.status === 'suspended') {
         return res.status(403).json({ error: 'Your account has been suspended. Please contact an administrator.' });
       }
 
+      let hasChanges = false;
       // Update google_id and avatar if missing
       if (!user.google_id) {
         db.run('UPDATE users SET google_id = ? WHERE id = ?', [cleanGoogleId, user.id]);
         user.google_id = cleanGoogleId;
+        hasChanges = true;
       }
       if (avatar && !user.avatar) {
         db.run('UPDATE users SET avatar = ? WHERE id = ?', [avatar, user.id]);
         user.avatar = avatar;
+        hasChanges = true;
       }
 
       // If user has 2FA enabled, require TOTP verification
@@ -350,7 +376,13 @@ authRouter.post('/google', async (req, res) => {
         effectiveRole = 'admin';
         if (user.role !== 'admin') {
           db.run("UPDATE users SET role = 'admin' WHERE id = ?", [user.id]);
+          user.role = 'admin';
+          hasChanges = true;
         }
+      }
+
+      if (hasChanges) {
+        await recordUser({ ...user, role: effectiveRole });
       }
 
       const userProfile = {
@@ -405,7 +437,15 @@ authRouter.post('/google', async (req, res) => {
       createdAt,
     };
 
-    await recordUser(newUserProfile);
+    await recordUser({
+      ...newUserProfile,
+      password: '',
+      two_factor_enabled: 0,
+      two_factor_secret: null,
+      google_id: cleanGoogleId,
+      created_at: createdAt,
+      createdAt,
+    });
 
     const token = generateToken(newUserProfile);
     res.status(201).json({ token, user: newUserProfile });
@@ -441,7 +481,7 @@ authRouter.get('/2fa/setup', authenticateToken, (req, res) => {
 });
 
 // POST /api/auth/2fa/enable - Confirm and activate Authenticator with 6-digit code
-authRouter.post('/2fa/enable', authenticateToken, (req, res) => {
+authRouter.post('/2fa/enable', authenticateToken, async (req, res) => {
   try {
     const { secret, code } = req.body;
 
@@ -458,16 +498,20 @@ authRouter.post('/2fa/enable', authenticateToken, (req, res) => {
 
     db.run('UPDATE users SET two_factor_enabled = 1, two_factor_secret = ? WHERE id = ?', [secret, req.user.id]);
 
-    const updatedUser = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [req.user.id]);
+    const fullUser = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (fullUser) {
+      await recordUser(fullUser);
+    }
+
     const userProfile = {
-      id: updatedUser.id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      avatar: updatedUser.avatar,
-      role: updatedUser.role || 'user',
-      status: updatedUser.status || 'active',
+      id: fullUser.id,
+      name: fullUser.name,
+      email: fullUser.email,
+      avatar: fullUser.avatar,
+      role: fullUser.role || 'user',
+      status: fullUser.status || 'active',
       twoFactorEnabled: true,
-      createdAt: updatedUser.created_at
+      createdAt: fullUser.created_at
     };
 
     const token = generateToken(userProfile);
@@ -522,16 +566,20 @@ authRouter.post('/2fa/disable', authenticateToken, async (req, res) => {
 
     db.run('UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?', [user.id]);
 
-    const updatedUser = db.get('SELECT id, name, email, avatar, role, status, two_factor_enabled, created_at FROM users WHERE id = ?', [user.id]);
+    const fullUser = db.get('SELECT * FROM users WHERE id = ?', [user.id]);
+    if (fullUser) {
+      await recordUser(fullUser);
+    }
+
     const userProfile = {
-      id: updatedUser.id,
-      name: updatedUser.name,
-      email: updatedUser.email,
-      avatar: updatedUser.avatar,
-      role: updatedUser.role || 'user',
-      status: updatedUser.status || 'active',
+      id: fullUser.id,
+      name: fullUser.name,
+      email: fullUser.email,
+      avatar: fullUser.avatar,
+      role: fullUser.role || 'user',
+      status: fullUser.status || 'active',
       twoFactorEnabled: false,
-      createdAt: updatedUser.created_at
+      createdAt: fullUser.created_at
     };
 
     const token = generateToken(userProfile);
@@ -844,6 +892,11 @@ authRouter.put('/password', authenticateToken, async (req, res) => {
     const hashed = await bcrypt.hash(newPassword, 10);
     db.run('UPDATE users SET password = ? WHERE id = ?', [hashed, req.user.id]);
 
+    const updated = db.get('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (updated) {
+      await recordUser(updated);
+    }
+
     res.json({ message: 'Password successfully updated.' });
   } catch (err) {
     console.error('Password change error:', err);
@@ -865,7 +918,15 @@ authRouter.post('/reset-password', async (req, res) => {
     }
 
     const trimmedEmail = email.trim().toLowerCase();
-    const user = db.get('SELECT id FROM users WHERE email = ?', [trimmedEmail]);
+
+    // Ensure users are synced before querying
+    await syncUsersFromCloud().catch(() => {});
+    let user = db.get('SELECT * FROM users WHERE LOWER(email) = ?', [trimmedEmail]);
+
+    if (!user) {
+      await syncUsersFromCloud(true).catch(() => {});
+      user = db.get('SELECT * FROM users WHERE LOWER(email) = ?', [trimmedEmail]);
+    }
 
     if (!user) {
       return res.status(404).json({ error: 'No ReedShelf account was found with that email.' });
@@ -873,6 +934,11 @@ authRouter.post('/reset-password', async (req, res) => {
 
     const hashed = await bcrypt.hash(password, 10);
     db.run('UPDATE users SET password = ? WHERE id = ?', [hashed, user.id]);
+
+    const updated = db.get('SELECT * FROM users WHERE id = ?', [user.id]);
+    if (updated) {
+      await recordUser(updated);
+    }
 
     res.json({ message: 'Password reset successfully. You can now sign in.' });
   } catch (err) {
