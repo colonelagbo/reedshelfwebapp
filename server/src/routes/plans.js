@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { db } from '../db.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { syncPlansFromCloud, recordPlanInCloud, removePlanFromCloud } from '../storage/cloudSync.js';
 
 export const plansRouter = express.Router();
 
@@ -40,8 +41,9 @@ plansRouter.get('/search-users', authenticateToken, (req, res) => {
 });
 
 // GET /api/plans - Get user's reading plans (including group plans where user is a member)
-plansRouter.get('/', authenticateToken, (req, res) => {
+plansRouter.get('/', authenticateToken, async (req, res) => {
   try {
+    await syncPlansFromCloud();
     const user = req.user;
     const userName = (user?.name || '').toLowerCase();
     const userCleanName = userName.replace(/\s+/g, '');
@@ -156,7 +158,7 @@ plansRouter.post('/', authenticateToken, (req, res) => {
       ]
     );
 
-    res.status(201).json({
+    const newPlan = {
       id: planId,
       userId: req.user.id,
       bookId,
@@ -170,7 +172,11 @@ plansRouter.post('/', authenticateToken, (req, res) => {
       members: membersList,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+
+    recordPlanInCloud(newPlan).catch(() => {});
+
+    res.status(201).json(newPlan);
   } catch (err) {
     console.error('Error creating plan:', err);
     res.status(500).json({ error: 'Failed to create reading plan.' });
@@ -181,6 +187,7 @@ plansRouter.post('/', authenticateToken, (req, res) => {
 plansRouter.delete('/:id', authenticateToken, (req, res) => {
   try {
     db.run('DELETE FROM reading_plans WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
+    removePlanFromCloud(req.params.id).catch(() => {});
     res.json({ message: 'Reading plan deleted successfully.' });
   } catch (err) {
     console.error('Error deleting plan:', err);

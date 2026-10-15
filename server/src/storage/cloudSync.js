@@ -262,3 +262,133 @@ export async function removeBookFromCloud(bookId) {
     console.warn('[CloudSync] removeBook notice:', err.message);
   }
 }
+
+let lastPlansSync = 0;
+
+/**
+ * Synchronize all reading plans between SQLite and Supabase Storage metadata
+ */
+export async function syncPlansFromCloud(force = false) {
+  const now = Date.now();
+  if (!force && now - lastPlansSync < SYNC_INTERVAL_MS) {
+    return db.all('SELECT * FROM reading_plans ORDER BY created_at DESC');
+  }
+  lastPlansSync = now;
+
+  try {
+    const cloudPlans = await supabaseStorage.getMetadata('plans.json');
+    const localPlans = db.all('SELECT * FROM reading_plans');
+    const localPlanMap = new Map(localPlans.map((p) => [p.id, p]));
+    const cloudPlanMap = new Map(Array.isArray(cloudPlans) ? cloudPlans.map((p) => [p.id, p]) : []);
+
+    let needsCloudUpdate = false;
+
+    // 1. Ingest cloud plans into local database
+    if (Array.isArray(cloudPlans)) {
+      for (const p of cloudPlans) {
+        if (!localPlanMap.has(p.id)) {
+          try {
+            db.run(
+              `INSERT INTO reading_plans (
+                id, user_id, book_id, start_date, target_date, days,
+                pages_per_day, total_pages, created_at, updated_at,
+                plan_type, group_name, group_members
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                p.id,
+                p.user_id || p.userId,
+                p.book_id || p.bookId,
+                p.start_date || p.startDate,
+                p.target_date || p.targetDate,
+                p.days,
+                p.pages_per_day || p.pagesPerDay,
+                p.total_pages || p.totalPages,
+                p.created_at || p.createdAt || new Date().toISOString(),
+                p.updated_at || p.updatedAt || new Date().toISOString(),
+                p.plan_type || p.planType || 'individual',
+                p.group_name || p.groupName || '',
+                typeof p.group_members === 'string' ? p.group_members : JSON.stringify(p.members || p.group_members || []),
+              ]
+            );
+            localPlanMap.set(p.id, p);
+          } catch {
+            // Ignore collision
+          }
+        }
+      }
+    }
+
+    // 2. Export local plans to cloud map
+    for (const p of localPlans) {
+      if (!cloudPlanMap.has(p.id)) {
+        cloudPlanMap.set(p.id, {
+          id: p.id,
+          user_id: p.user_id,
+          book_id: p.book_id,
+          start_date: p.start_date,
+          target_date: p.target_date,
+          days: p.days,
+          pages_per_day: p.pages_per_day,
+          total_pages: p.total_pages,
+          created_at: p.created_at,
+          updated_at: p.updated_at,
+          plan_type: p.plan_type,
+          group_name: p.group_name,
+          group_members: p.group_members,
+        });
+        needsCloudUpdate = true;
+      }
+    }
+
+    // 3. Save merged list back to Supabase Storage
+    if (needsCloudUpdate || (Array.isArray(cloudPlans) && cloudPlans.length < cloudPlanMap.size)) {
+      const merged = Array.from(cloudPlanMap.values());
+      await supabaseStorage.saveMetadata('plans.json', merged);
+    }
+  } catch (err) {
+    console.warn('[CloudSync] Plan sync notice:', err.message);
+  }
+
+  return db.all('SELECT * FROM reading_plans ORDER BY created_at DESC');
+}
+
+/**
+ * Record a new or updated reading plan in cloud metadata
+ */
+export async function recordPlanInCloud(plan) {
+  try {
+    const cloudPlans = (await supabaseStorage.getMetadata('plans.json')) || [];
+    const filtered = cloudPlans.filter((p) => p.id !== plan.id);
+    filtered.unshift({
+      id: plan.id,
+      user_id: plan.userId || plan.user_id,
+      book_id: plan.bookId || plan.book_id,
+      start_date: plan.startDate || plan.start_date,
+      target_date: plan.targetDate || plan.target_date,
+      days: plan.days,
+      pages_per_day: plan.pagesPerDay || plan.pages_per_day,
+      total_pages: plan.totalPages || plan.total_pages,
+      plan_type: plan.planType || plan.plan_type || 'individual',
+      group_name: plan.groupName || plan.group_name || '',
+      group_members: typeof plan.group_members === 'string' ? plan.group_members : JSON.stringify(plan.members || []),
+      created_at: plan.createdAt || plan.created_at || new Date().toISOString(),
+      updated_at: plan.updatedAt || plan.updated_at || new Date().toISOString(),
+    });
+    await supabaseStorage.saveMetadata('plans.json', filtered);
+  } catch (err) {
+    console.warn('[CloudSync] recordPlan notice:', err.message);
+  }
+}
+
+/**
+ * Remove a plan from cloud metadata
+ */
+export async function removePlanFromCloud(planId) {
+  try {
+    const cloudPlans = (await supabaseStorage.getMetadata('plans.json')) || [];
+    const filtered = cloudPlans.filter((p) => p.id !== planId);
+    await supabaseStorage.saveMetadata('plans.json', filtered);
+  } catch (err) {
+    console.warn('[CloudSync] removePlan notice:', err.message);
+  }
+}

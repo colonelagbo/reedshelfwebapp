@@ -522,23 +522,22 @@ export async function deletePlan(id) {
 const DAILY_READING_KEY = 'reedshelf_daily_reading';
 
 export function getDailyQuotaForBook(userId, bookId) {
-  if (!userId) return 10;
+  if (!userId || !bookId) return null;
   const plans = getUserPlans(userId);
   const bookPlan = plans.find((p) => p.bookId === bookId);
   if (bookPlan?.pagesPerDay) return Number(bookPlan.pagesPerDay);
-  if (plans[0]?.pagesPerDay) return Number(plans[0].pagesPerDay);
-  return 10;
+  return null;
 }
 
 export function getDailyReadingStatus(userId, bookId) {
-  if (!userId || !bookId) {
-    return { quota: 10, pagesReadToday: 0, celebrated: false, isMet: false };
-  }
+  if (!userId || !bookId) return null;
+  const quota = getDailyQuotaForBook(userId, bookId);
+  if (!quota) return null;
+
   const todayKey = new Date().toISOString().slice(0, 10);
   const store = read(DAILY_READING_KEY, {});
   const entryKey = `${userId}:${bookId}:${todayKey}`;
   const record = store[entryKey];
-  const quota = getDailyQuotaForBook(userId, bookId);
 
   const pagesReadToday = record?.pagesReadToday || 0;
   const celebrated = Boolean(record?.celebrated);
@@ -552,11 +551,16 @@ export function getDailyReadingStatus(userId, bookId) {
 }
 
 export function recordDailyReadingProgress(userId, bookId, currentPage) {
-  if (!userId || !bookId) return { shouldCelebrate: false, quota: 10, pagesReadToday: 0 };
+  if (!userId || !bookId) return { shouldCelebrate: false, quota: null, pagesReadToday: 0 };
+  const quota = getDailyQuotaForBook(userId, bookId);
+  if (!quota) {
+    // If no plan created for this book, do not track or celebrate quota
+    return { shouldCelebrate: false, quota: null, pagesReadToday: 0 };
+  }
+
   const todayKey = new Date().toISOString().slice(0, 10);
   const store = read(DAILY_READING_KEY, {});
   const entryKey = `${userId}:${bookId}:${todayKey}`;
-  const quota = getDailyQuotaForBook(userId, bookId);
 
   let record = store[entryKey];
   const pageNum = Math.max(1, Number(currentPage) || 1);

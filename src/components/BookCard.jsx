@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { BookOpen, MoreHorizontal, Play, Trash2, CheckCircle2, Clock, Check } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { BookOpen, MoreHorizontal, Play, Trash2, CheckCircle2, Clock, Check, CalendarDays, Target } from 'lucide-react';
+import { getCurrentUser, getUserPlans } from '../lib/appStore';
 
 export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete, view = 'grid' }) {
+  const navigate = useNavigate();
   const cover = book.coverDataUrl || (book.coverUrl && !book.coverUrl.endsWith('/file') ? book.coverUrl : null);
   const [coverError, setCoverError] = useState(false);
   const hasCover = cover && !coverError;
@@ -10,10 +13,24 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
   const isFinished = progress >= 100;
   const isStarted = progress > 0 && !isFinished;
 
+  const user = getCurrentUser();
+  const plans = user?.id ? getUserPlans(user.id) : [];
+  const bookPlan = plans.find((p) => p.bookId === book.id);
+
   const handleDeleteClick = (e) => {
     e.stopPropagation();
     setMenuOpen(false);
     onDelete?.(book);
+  };
+
+  const handlePlanClick = (e) => {
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (bookPlan) {
+      navigate('/app/reading-plans');
+    } else {
+      navigate(`/app/reading-plans?bookId=${book.id}`);
+    }
   };
 
   const coverBox = (
@@ -272,33 +289,39 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
               {book.title}
             </h3>
 
-            {onDelete && (
-              <div className="relative shrink-0">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMenuOpen((v) => !v);
-                  }}
-                  className="flex h-7 w-7 items-center justify-center rounded-lg text-[#9aa9a2] transition hover:bg-[#f0eee6] hover:text-[#0b1619] dark:hover:bg-white/10 dark:hover:text-white"
-                  aria-label="Book options"
-                >
-                  <MoreHorizontal size={16} />
-                </button>
-                {menuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
-                    <div className="absolute right-0 top-full z-40 mt-1 w-36 overflow-hidden rounded-xl border border-[#e4e1d6] bg-white py-1 shadow-xl dark:border-white/10 dark:bg-[#1a2c30]">
+            <div className="relative shrink-0">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen((v) => !v);
+                }}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-[#9aa9a2] transition hover:bg-[#f0eee6] hover:text-[#0b1619] dark:hover:bg-white/10 dark:hover:text-white cursor-pointer"
+                aria-label="Book options"
+              >
+                <MoreHorizontal size={16} />
+              </button>
+              {menuOpen && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }} />
+                  <div className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-[#e4e1d6] bg-white py-1 shadow-xl dark:border-white/10 dark:bg-[#1a2c30]">
+                    <button
+                      onClick={handlePlanClick}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-[#007268] hover:bg-[#009689]/10 dark:text-[#5fc4b8] dark:hover:bg-white/10 transition cursor-pointer"
+                    >
+                      <CalendarDays size={14} /> {bookPlan ? 'View reading plan' : 'Create reading plan'}
+                    </button>
+                    {onDelete && (
                       <button
                         onClick={handleDeleteClick}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-red-500 hover:bg-red-500/10 transition"
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-red-500 hover:bg-red-500/10 transition cursor-pointer border-t border-stone-100 dark:border-white/5"
                       >
                         <Trash2 size={14} /> Delete book
                       </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <p className="mt-1 truncate text-[11px] sm:text-xs text-[#7b8c84] dark:text-white/60" title={book.author}>
@@ -309,8 +332,13 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
         {/* Progress bar and page tracker */}
         <div className="mt-3 border-t border-[#f0eee6] pt-2.5 dark:border-white/5">
           <div className="mb-1.5 flex items-center justify-between text-[11px]">
-            <span className="font-medium text-[#7b8c84] dark:text-white/50">
+            <span className="font-medium text-[#7b8c84] dark:text-white/50 flex items-center gap-1">
               {totalPages > 0 && isStarted ? `p. ${currentPage} of ${totalPages}` : isFinished ? 'Completed' : 'Progress'}
+              {bookPlan && (
+                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-[#007268] dark:text-[#5fc4b8]">
+                  • {bookPlan.pagesPerDay}p/day
+                </span>
+              )}
             </span>
             <span className={`font-bold ${isFinished ? 'text-emerald-600 dark:text-emerald-400' : 'text-[#007268] dark:text-[#5fc4b8]'}`}>
               {Math.round(progress)}%

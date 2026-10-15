@@ -42,7 +42,8 @@ import {
   saveBookFile,
   recordDailyReadingProgress,
   markDailyQuotaCelebrated,
-  getDailyReadingStatus
+  getDailyReadingStatus,
+  getDailyQuotaForBook
 } from '../lib/appStore';
 
 // Configure worker URL using Vite asset bundle with fallback
@@ -137,16 +138,23 @@ export function Reader() {
     setTimeout(() => setToastMessage(''), 2500);
   }, []);
 
+  const currentPageRef = useRef(currentPage);
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
   // Exit Book Handler - saves progress, exits fullscreen, and navigates reliably
   const handleExitBook = useCallback((e) => {
     if (e) {
-      e.preventDefault();
-      e.stopPropagation();
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      if (typeof e.stopPropagation === 'function') e.stopPropagation();
     }
     // 1. Immediately persist reading progress
-    if (user?.id && bookId) {
+    const activeUser = user || getCurrentUser();
+    const pageToSave = currentPageRef.current || currentPage;
+    if (activeUser?.id && bookId) {
       try {
-        saveProgress(user.id, bookId, currentPage);
+        saveProgress(activeUser.id, bookId, pageToSave);
       } catch (err) {
         console.warn('Error saving progress on exit:', err);
       }
@@ -163,8 +171,22 @@ export function Reader() {
         // ignore
       }
     }
-    // 3. React Router navigation back to library
-    navigate('/app/library');
+    // 3. React Router navigation back with history check & fallback
+    try {
+      if (window.history.state && window.history.state.idx > 0) {
+        navigate(-1);
+      } else {
+        navigate('/app/library');
+      }
+    } catch {
+      navigate('/app/library');
+    }
+    // Fallback ensure exit within 150ms if path hasn't changed
+    setTimeout(() => {
+      if (window.location.pathname.includes('/reader/')) {
+        navigate('/app/library');
+      }
+    }, 150);
   }, [user, bookId, currentPage, navigate]);
 
   const handlePauseTillTomorrow = () => {
@@ -267,9 +289,15 @@ export function Reader() {
     return () => clearTimeout(t);
   }, [currentPage, user, bookId]);
 
-  // 2b. Track daily reading quota and trigger milestone modal
+  // 2b. Track daily reading quota and trigger milestone modal ONLY if a reading plan was created for this book
   useEffect(() => {
     if (!user || !bookId || loading) return;
+    const quota = getDailyQuotaForBook(user.id, bookId);
+    if (!quota) {
+      setDailyStatus(null);
+      return;
+    }
+
     const res = recordDailyReadingProgress(user.id, bookId, currentPage);
     setDailyStatus(getDailyReadingStatus(user.id, bookId));
 
@@ -553,7 +581,7 @@ export function Reader() {
   };
 
   const handleTouchStart = (e) => {
-    if (e.target.closest('button, aside, [role="dialog"], input')) return;
+    if (e.target.closest('button, aside, [role="dialog"], input, header, footer')) return;
     const touch = e.touches?.[0];
     if (touch) {
       touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
@@ -561,7 +589,7 @@ export function Reader() {
   };
 
   const handleTouchEnd = (e) => {
-    if (e.target.closest('button, aside, [role="dialog"], input')) return;
+    if (e.target.closest('button, aside, [role="dialog"], input, header, footer')) return;
     const touch = e.changedTouches?.[0];
     if (!touch) return;
 
@@ -571,8 +599,11 @@ export function Reader() {
     const deltaY = touch.clientY - startY;
     const deltaTime = Date.now() - touchStartRef.current.time;
 
+    // Ignore gestures starting near the left or right edges (to allow native phone navigation swipe)
+    if (startX < 32 || (window.innerWidth && startX > window.innerWidth - 32)) return;
+
     // Check if horizontal swipe gesture (at least 35px, mainly horizontal, within 500ms)
-    if (Math.abs(deltaX) > 35 && Math.abs(deltaX) > Math.abs(deltaY) * 1.1 && deltaTime < 500) {
+    if (Math.abs(deltaX) > 35 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2 && deltaTime < 500) {
       setShowSwipeReminder(false);
       if (deltaX < 0) {
         // Swipe left -> Next Page
@@ -647,9 +678,11 @@ export function Reader() {
   // Save progress and clean up on browser/mobile back button (popstate)
   useEffect(() => {
     const handlePopState = () => {
-      if (user?.id && bookId) {
+      const activeUser = user || getCurrentUser();
+      const pageToSave = currentPageRef.current || currentPage;
+      if (activeUser?.id && bookId) {
         try {
-          saveProgress(user.id, bookId, currentPage);
+          saveProgress(activeUser.id, bookId, pageToSave);
         } catch (_err) {
           // ignore save error on popstate
         }
@@ -664,7 +697,35 @@ export function Reader() {
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [user?.id, bookId, currentPage]);
+  }, [user, bookId, currentPage]);
+
+  // Save progress on component unmount
+  useEffect(() => {
+    return () => {
+      const activeUser = getCurrentUser();
+      const pageToSave = currentPageRef.current;
+      if (activeUser?.id && bookId && pageToSave) {
+        saveProgress(activeUser.id, bookId, pageToSave);
+      }
+    };
+  }, [bookId]);
+
+  // Save progress on tab close, reload, or pagehide
+  useEffect(() => {
+    const handleUnload = () => {
+      const activeUser = getCurrentUser();
+      const pageToSave = currentPageRef.current;
+      if (activeUser?.id && bookId && pageToSave) {
+        saveProgress(activeUser.id, bookId, pageToSave);
+      }
+    };
+    window.addEventListener('pagehide', handleUnload);
+    window.addEventListener('beforeunload', handleUnload);
+    return () => {
+      window.removeEventListener('pagehide', handleUnload);
+      window.removeEventListener('beforeunload', handleUnload);
+    };
+  }, [bookId]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -771,15 +832,26 @@ export function Reader() {
 
       {/* Fullscreen Reader Header with Close / Exit Button */}
       <header
-        style={{ backgroundColor: themeConfig.navBg, borderColor: themeConfig.border }}
-        className="relative z-40 flex h-13 sm:h-14 shrink-0 items-center justify-between border-b px-2.5 sm:px-5 backdrop-blur gap-2"
+        style={{
+          backgroundColor: themeConfig.navBg,
+          borderColor: themeConfig.border,
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+          paddingLeft: 'max(0.625rem, env(safe-area-inset-left, 0px))',
+          paddingRight: 'max(0.625rem, env(safe-area-inset-right, 0px))',
+        }}
+        className="relative z-40 flex min-h-[calc(3.5rem+env(safe-area-inset-top,0px))] shrink-0 items-center justify-between border-b px-2.5 sm:px-5 backdrop-blur gap-2"
       >
         {/* Left: Exit Button + Book Info */}
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={handleExitBook}
-            className="group flex h-9 sm:h-10 items-center gap-1.5 rounded-xl bg-[#009689] px-3 sm:px-3.5 text-xs sm:text-sm font-bold text-white shadow-xs transition hover:bg-[#007268] shrink-0 active:scale-95 cursor-pointer touch-manipulation border border-[#009689]"
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleExitBook(e);
+            }}
+            className="group flex h-9 sm:h-10 items-center gap-1.5 rounded-xl bg-[#009689] px-3 sm:px-3.5 text-xs sm:text-sm font-bold text-white shadow-xs transition hover:bg-[#007268] shrink-0 active:scale-95 cursor-pointer touch-manipulation border border-[#009689] z-50 pointer-events-auto"
             title="Back to library (Escape)"
             aria-label="Back to library"
           >
@@ -847,8 +919,8 @@ export function Reader() {
 
         {/* Right: Theme, Fit Mode, Highlights, Fullscreen, Exit */}
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-          {/* Daily Reading Goal Status Pill */}
-          {dailyStatus && (
+          {/* Daily Reading Goal Status Pill (ONLY if a reading plan was created for this book) */}
+          {dailyStatus && dailyStatus.quota && (
             <div
               className={`hidden md:inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-[11px] font-bold border transition ${
                 dailyStatus.isMet
@@ -943,7 +1015,12 @@ export function Reader() {
           <button
             type="button"
             onClick={handleExitBook}
-            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-black/10 dark:bg-white/10 opacity-90 transition hover:bg-red-600 hover:text-white cursor-pointer touch-manipulation"
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleExitBook(e);
+            }}
+            className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-black/10 dark:bg-white/10 opacity-90 transition hover:bg-red-600 hover:text-white cursor-pointer touch-manipulation z-50 pointer-events-auto"
             title="Exit book and return to library"
             aria-label="Exit book"
           >
@@ -1210,8 +1287,10 @@ export function Reader() {
           backgroundColor: themeConfig.navBg,
           borderColor: themeConfig.border,
           paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom, 0px))',
+          paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0px))',
+          paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0px))',
         }}
-        className="flex min-h-[2.75rem] shrink-0 items-center justify-between border-t px-3 sm:px-4 py-1.5 text-xs opacity-90"
+        className="flex min-h-[calc(2.75rem+env(safe-area-inset-bottom,0px))] shrink-0 items-center justify-between border-t px-3 sm:px-4 py-1.5 text-xs opacity-90"
       >
         <div className="flex items-center gap-1.5 sm:gap-2 font-medium text-[11px] sm:text-xs">
           <span>{totalPages ? Math.round((currentPage / totalPages) * 100) : 0}%</span>
@@ -1243,8 +1322,8 @@ export function Reader() {
         </div>
       </footer>
 
-      {/* Daily Reading Quota Met Milestone Modal */}
-      {showQuotaModal && (
+      {/* Daily Reading Quota Met Milestone Modal (ONLY if user created a reading plan for this book) */}
+      {showQuotaModal && quotaDetails?.quota && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fade-in">
           <div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-[#009689]/40 bg-white p-6 sm:p-8 text-[#0b1619] shadow-2xl dark:border-[#5fc4b8]/30 dark:bg-[#122326] dark:text-white">
             {/* Background Glow Accents */}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import {
   CalendarDays,
   Plus,
@@ -41,12 +41,14 @@ const PRESET_DAYS = [
 ];
 
 export function ReadingPlans() {
+  const [searchParams] = useSearchParams();
+  const bookIdParam = searchParams.get('bookId');
   const user = getCurrentUser();
   const navigate = useNavigate();
   const [books, setBooks] = useState(() => getUserBooks(user?.id || ''));
   const [plans, setPlans] = useState(() => (user?.id ? getUserPlans(user.id) : []));
-  const [open, setOpen] = useState(false);
-  const [selectedBookId, setSelectedBookId] = useState('');
+  const [open, setOpen] = useState(() => Boolean(bookIdParam));
+  const [selectedBookId, setSelectedBookId] = useState(() => bookIdParam || '');
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [days, setDays] = useState(14);
   const [planType, setPlanType] = useState('individual'); // 'individual' | 'group'
@@ -55,6 +57,13 @@ export function ReadingPlans() {
   const [members, setMembers] = useState([]);
   const [userSuggestions, setUserSuggestions] = useState([]);
   const [filterPlanTab, setFilterPlanTab] = useState('all'); // 'all' | 'individual' | 'group'
+
+  useEffect(() => {
+    if (bookIdParam) {
+      setSelectedBookId(bookIdParam);
+      setOpen(true);
+    }
+  }, [bookIdParam]);
 
   useEffect(() => {
     if (user?.id) {
@@ -67,11 +76,11 @@ export function ReadingPlans() {
             return !owner || owner === user.id || owner === 'demo_user';
           }) : b;
           setBooks(userBooks);
-          setSelectedBookId((curr) => curr || (userBooks.length > 0 ? userBooks[0].id : ''));
+          setSelectedBookId((curr) => curr || bookIdParam || (userBooks.length > 0 ? userBooks[0].id : ''));
         }
       }).catch(() => {});
     }
-  }, [user?.id, user?.role]);
+  }, [user?.id, user?.role, bookIdParam]);
 
   const selectedBook = useMemo(
     () => books.find((b) => b.id === selectedBookId) || books[0],
