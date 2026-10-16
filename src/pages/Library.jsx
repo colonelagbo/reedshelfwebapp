@@ -201,15 +201,9 @@ export function Library() {
         {/* Page Header */}
         <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-[#007268] dark:text-[#5fc4b8]">
-              Personal Library
-            </span>
-            <h1 className="mt-0.5 text-2xl sm:text-3xl font-extrabold text-[#0b1619] dark:text-white tracking-tight">
-              Library Shelf
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#0b1619] dark:text-white tracking-tight">
+              Your personal bookshelf
             </h1>
-            <p className="mt-1 text-xs sm:text-sm text-[#6b7a77] dark:text-white/60">
-              Browse, organize, and continue reading your books with high-fidelity digital covers.
-            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <Link
