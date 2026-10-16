@@ -110,6 +110,30 @@ highlightsRouter.post('/:bookId', authenticateToken, async (req, res) => {
   }
 });
 
+// PUT /api/highlights/:id - Update highlight color
+highlightsRouter.put('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { color } = req.body;
+    if (!color) {
+      return res.status(400).json({ error: 'Color is required.' });
+    }
+
+    db.run('UPDATE highlights SET color = ? WHERE id = ? AND user_id = ?', [color, req.params.id, req.user.id]);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('highlights').update({ color }).eq('id', req.params.id).eq('user_id', req.user.id);
+      } catch {}
+    }
+
+    res.json({ message: 'Highlight updated successfully.', id: req.params.id, color });
+  } catch (err) {
+    console.error('Error updating highlight:', err);
+    res.status(500).json({ error: 'Failed to update highlight.' });
+  }
+});
+
 // DELETE /api/highlights/:id - Delete a highlight
 highlightsRouter.delete('/:id', authenticateToken, async (req, res) => {
   try {

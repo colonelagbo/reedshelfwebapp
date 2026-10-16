@@ -866,10 +866,27 @@ export async function saveHighlight(userId, bookId, highlight) {
 
   try {
     const saved = await api.highlights.create(bookId, highlight);
-    return all[key].map((h) => (h.id === localItem.id ? saved : h));
+    const updated = (all[key] || []).map((h) => (h.id === localItem.id ? saved : h));
+    all[key] = updated;
+    write(HIGHLIGHTS_KEY, all);
+    return updated;
   } catch (err) {
     return all[key];
   }
+}
+
+export async function updateHighlightColor(userId, bookId, id, color) {
+  const all = read(HIGHLIGHTS_KEY, {});
+  const key = `${userId}:${bookId}`;
+  all[key] = (all[key] || []).map((h) => (h.id === id ? { ...h, color } : h));
+  write(HIGHLIGHTS_KEY, all);
+
+  try {
+    await api.highlights.update(id, { color });
+  } catch (err) {
+    // safe offline
+  }
+  return all[key];
 }
 
 export async function deleteHighlight(userId, bookId, id) {

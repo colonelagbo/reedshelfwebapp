@@ -344,6 +344,13 @@ export const api = {
       });
     },
 
+    async update(id, { color }) {
+      return await apiRequest(`/api/highlights/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ color }),
+      });
+    },
+
     async delete(id) {
       return await apiRequest(`/api/highlights/${id}`, {
         method: 'DELETE',

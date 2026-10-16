@@ -27,7 +27,9 @@ import {
   Pause,
   Play,
   Target,
-  CheckCircle2
+  CheckCircle2,
+  Search,
+  Download
 } from 'lucide-react';
 import {
   getBookFile,
@@ -36,7 +38,9 @@ import {
   getBooks,
   saveProgress,
   getHighlights,
+  fetchHighlights,
   saveHighlight,
+  updateHighlightColor,
   deleteHighlight,
   updateBook,
   saveBookFile,
@@ -58,6 +62,160 @@ const HIGHLIGHT_COLORS = [
   { name: 'Blue', value: '#78d1ff' },
   { name: 'Purple', value: '#cfa1ff' },
 ];
+
+function hexToRgba(hex, alpha = 0.42) {
+  if (!hex || typeof hex !== 'string') return `rgba(255, 210, 76, ${alpha})`;
+  let clean = hex.replace('#', '');
+  if (clean.length === 3) {
+    clean = clean.split('').map((c) => c + c).join('');
+  }
+  const num = parseInt(clean, 16);
+  if (Number.isNaN(num)) return `rgba(255, 210, 76, ${alpha})`;
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/**
+ * Accurately finds text spans and computes bounding rectangles for highlight overlays
+ */
+function computePageHighlightRects(textLayerDiv, pageHighlights) {
+  if (!textLayerDiv || !Array.isArray(pageHighlights) || pageHighlights.length === 0) {
+    return [];
+  }
+
+  const containerRect = textLayerDiv.getBoundingClientRect();
+  if (containerRect.width === 0 || containerRect.height === 0) {
+    return [];
+  }
+
+  // Gather text nodes and map their character offsets in fullText
+  const walker = document.createTreeWalker(textLayerDiv, NodeFilter.SHOW_TEXT);
+  const nodeRanges = [];
+  let fullText = '';
+  let currentNode;
+
+  while ((currentNode = walker.nextNode())) {
+    const text = currentNode.textContent;
+    if (text) {
+      const start = fullText.length;
+      fullText += text;
+      const end = fullText.length;
+      nodeRanges.push({ node: currentNode, start, end });
+    }
+  }
+
+  if (nodeRanges.length === 0 || fullText.length === 0) {
+    return [];
+  }
+
+  const results = [];
+
+  for (const h of pageHighlights) {
+    if (!h.text || !h.text.trim()) continue;
+    const cleanTarget = h.text.replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!cleanTarget) continue;
+
+    const escaped = cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regexPattern = escaped.replace(/\s+/g, '[\\s\\u00A0]*');
+    const matches = [];
+
+    try {
+      const regex = new RegExp(regexPattern, 'gi');
+      let match;
+      while ((match = regex.exec(fullText)) !== null) {
+        matches.push({ start: match.index, end: match.index + match[0].length });
+        if (matches.length >= 10) break;
+      }
+    } catch {
+      const idx = fullText.toLowerCase().indexOf(cleanTarget);
+      if (idx !== -1) {
+        matches.push({ start: idx, end: idx + cleanTarget.length });
+      }
+    }
+
+    // Fallback: If no match, try fuzzy matching ignoring non-alphanumeric punctuation
+    if (matches.length === 0) {
+      const simplifiedTarget = cleanTarget.replace(/[^a-z0-9]/g, '');
+      if (simplifiedTarget.length >= 3) {
+        const fuzzyPattern = simplifiedTarget
+          .split('')
+          .map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('[^a-zA-Z0-9]*');
+        try {
+          const fuzzyRegex = new RegExp(fuzzyPattern, 'i');
+          const fMatch = fuzzyRegex.exec(fullText);
+          if (fMatch) {
+            matches.push({ start: fMatch.index, end: fMatch.index + fMatch[0].length });
+          }
+        } catch {}
+      }
+    }
+
+    const hlRects = [];
+
+    for (const m of matches) {
+      let startNode = null;
+      let startOffset = 0;
+      let endNode = null;
+      let endOffset = 0;
+
+      for (const nr of nodeRanges) {
+        if (!startNode && m.start >= nr.start && m.start <= nr.end) {
+          startNode = nr.node;
+          startOffset = m.start - nr.start;
+        }
+        if (m.end >= nr.start && m.end <= nr.end) {
+          endNode = nr.node;
+          endOffset = m.end - nr.start;
+          break;
+        }
+      }
+
+      if (startNode && endNode) {
+        try {
+          const range = document.createRange();
+          range.setStart(startNode, Math.min(startOffset, startNode.textContent.length));
+          range.setEnd(endNode, Math.min(endOffset, endNode.textContent.length));
+
+          let clientRects = Array.from(range.getClientRects());
+          if (clientRects.length === 0) {
+            const bcr = range.getBoundingClientRect();
+            if (bcr && bcr.width > 1 && bcr.height > 1) {
+              clientRects = [bcr];
+            }
+          }
+
+          for (const cr of clientRects) {
+            if (cr.width > 1 && cr.height > 1) {
+              hlRects.push({
+                left: Math.round(cr.left - containerRect.left),
+                top: Math.round(cr.top - containerRect.top),
+                width: Math.round(cr.width),
+                height: Math.round(cr.height),
+              });
+            }
+          }
+        } catch {
+          // ignore boundary errors
+        }
+      }
+    }
+
+    if (hlRects.length > 0) {
+      results.push({
+        id: h.id,
+        text: h.text,
+        color: h.color || '#ffd24c',
+        page: h.page,
+        rects: hlRects,
+      });
+    }
+  }
+
+  return results;
+}
 
 const THEMES = {
   dark: {
@@ -111,6 +269,9 @@ export function Reader() {
   const [activeColor, setActiveColor] = useState(HIGHLIGHT_COLORS[0].value);
   const [showHighlightsDrawer, setShowHighlightsDrawer] = useState(false);
   const [selectionPopover, setSelectionPopover] = useState(null);
+  const [selectedHighlight, setSelectedHighlight] = useState(null);
+  const [renderedHighlightRects, setRenderedHighlightRects] = useState([]);
+  const [highlightSearchQuery, setHighlightSearchQuery] = useState('');
   const [toastMessage, setToastMessage] = useState('');
   const [copiedId, setCopiedId] = useState(null);
 
@@ -122,6 +283,7 @@ export function Reader() {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const textLayerRef = useRef(null);
+  const highlightsLayerRef = useRef(null);
   const renderTaskRef = useRef(null);
   const textLayerTaskRef = useRef(null);
   const renderIdRef = useRef(0);
@@ -130,6 +292,24 @@ export function Reader() {
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
   const fileInputRef = useRef(null);
   const reminderTimeoutRef = useRef(null);
+
+  // Synchronize highlights with cloud on book open
+  useEffect(() => {
+    if (!bookId) return;
+    let isMounted = true;
+    fetchHighlights(bookId)
+      .then((data) => {
+        if (isMounted && Array.isArray(data)) {
+          setHighlights(data);
+        }
+      })
+      .catch((err) => {
+        console.warn('Could not fetch cloud highlights:', err);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [bookId]);
 
   const themeConfig = THEMES[readerTheme] || THEMES.dark;
 
@@ -142,6 +322,28 @@ export function Reader() {
   useEffect(() => {
     currentPageRef.current = currentPage;
   }, [currentPage]);
+
+  const highlightsRef = useRef(highlights);
+  useEffect(() => {
+    highlightsRef.current = highlights;
+  }, [highlights]);
+
+  const pageHighlights = useMemo(
+    () => (Array.isArray(highlights) ? highlights.filter((h) => Number(h.page) === Number(currentPage)) : []),
+    [highlights, currentPage]
+  );
+
+  // Recalculate highlight overlays whenever pageHighlights or page changes
+  useEffect(() => {
+    if (!textLayerRef.current) return;
+    const timer = setTimeout(() => {
+      if (textLayerRef.current) {
+        const computed = computePageHighlightRects(textLayerRef.current, pageHighlights);
+        setRenderedHighlightRects(computed);
+      }
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [pageHighlights]);
 
   // Exit Book Handler - saves progress, exits fullscreen, and navigates reliably
   const handleExitBook = useCallback((e) => {
@@ -440,6 +642,24 @@ export function Reader() {
 
           textLayerTaskRef.current = textLayer;
           await textLayer.render();
+
+          // Immediately compute & draw highlight overlays over text
+          if (currentRenderId === renderIdRef.current) {
+            const curHls = (Array.isArray(highlightsRef.current) ? highlightsRef.current : []).filter(
+              (h) => Number(h.page) === Number(currentPage)
+            );
+            const computedRects = computePageHighlightRects(textLayerDiv, curHls);
+            setRenderedHighlightRects(computedRects);
+
+            setTimeout(() => {
+              if (currentRenderId === renderIdRef.current && textLayerRef.current) {
+                const refreshed = computePageHighlightRects(textLayerRef.current, curHls);
+                if (refreshed.length > 0 || computedRects.length === 0) {
+                  setRenderedHighlightRects(refreshed);
+                }
+              }
+            }, 60);
+          }
         } catch (textErr) {
           if (textErr?.name !== 'RenderingCancelledException') {
             console.warn('Text layer render notice:', textErr);
@@ -522,20 +742,37 @@ export function Reader() {
 
   // 4. Text Highlighting & Double Tap / Double Click handlers
   const createHighlight = useCallback(
-    (textToHighlight, colorToUse = activeColor) => {
+    async (textToHighlight, colorToUse = activeColor) => {
       const trimmed = textToHighlight?.trim();
-      if (!trimmed || !user) return;
+      if (!trimmed || !user || !bookId) return;
 
-      const newHighlights = saveHighlight(user.id, bookId, {
+      const tempId = `hl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const optimisticItem = {
+        id: tempId,
         text: trimmed,
         page: currentPage,
         color: colorToUse,
-      });
+        createdAt: new Date().toISOString(),
+      };
 
-      setHighlights(newHighlights);
+      setHighlights((prev) => [...(Array.isArray(prev) ? prev : []), optimisticItem]);
       setSelectionPopover(null);
+      setSelectedHighlight(null);
       window.getSelection()?.removeAllRanges();
       showToast('✨ Highlight saved!');
+
+      try {
+        const savedList = await saveHighlight(user.id, bookId, {
+          text: trimmed,
+          page: currentPage,
+          color: colorToUse,
+        });
+        if (Array.isArray(savedList)) {
+          setHighlights(savedList);
+        }
+      } catch (err) {
+        console.warn('Failed to save highlight to cloud:', err);
+      }
     },
     [user, bookId, currentPage, activeColor, showToast]
   );
@@ -545,10 +782,47 @@ export function Reader() {
       const sel = window.getSelection();
       const text = sel?.toString()?.trim();
 
+      // Case 1: No active text selection - check if existing highlight clicked
       if (!text || text.length === 0) {
         setSelectionPopover(null);
+        if (textLayerRef.current && e) {
+          const containerRect = textLayerRef.current.getBoundingClientRect();
+          const clientX = e.clientX ?? e.changedTouches?.[0]?.clientX ?? touchStartRef.current.x;
+          const clientY = e.clientY ?? e.changedTouches?.[0]?.clientY ?? touchStartRef.current.y;
+
+          if (typeof clientX === 'number' && typeof clientY === 'number') {
+            const clickX = clientX - containerRect.left;
+            const clickY = clientY - containerRect.top;
+
+            const hit = renderedHighlightRects.find((hl) =>
+              hl.rects.some(
+                (r) =>
+                  clickX >= r.left - 4 &&
+                  clickX <= r.left + r.width + 4 &&
+                  clickY >= r.top - 2 &&
+                  clickY <= r.top + r.height + 2
+              )
+            );
+
+            if (hit) {
+              setSelectedHighlight({
+                id: hit.id,
+                text: hit.text,
+                color: hit.color,
+                page: hit.page,
+                x: clientX,
+                y: clientY,
+              });
+              return;
+            }
+          }
+        }
+        setSelectedHighlight(null);
         return;
       }
+
+      // Case 2: Active text selected
+      setSelectedHighlight(null);
 
       // If double-tapped or double-clicked, highlight immediately!
       if (isDoubleTap) {
@@ -556,28 +830,45 @@ export function Reader() {
         return;
       }
 
-      // Otherwise show floating highlight toolbar above selection
+      // Ensure selection is inside the PDF textLayer (not header/inputs/drawer)
+      if (textLayerRef.current && !textLayerRef.current.contains(sel.anchorNode)) {
+        setSelectionPopover(null);
+        return;
+      }
+
       try {
         const range = sel.getRangeAt(0);
         const rect = range.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) {
+          setSelectionPopover(null);
+          return;
+        }
+
+        const top = rect.top > 65 ? rect.top - 54 : rect.bottom + 8;
+        const left = Math.max(12, Math.min(window.innerWidth - 240, rect.left + rect.width / 2 - 120));
+
         setSelectionPopover({
           text,
-          top: Math.max(12, rect.top - 52),
-          left: Math.max(12, Math.min(window.innerWidth - 220, rect.left + rect.width / 2 - 110)),
+          top,
+          left,
         });
       } catch {
         setSelectionPopover(null);
       }
     },
-    [activeColor, createHighlight]
+    [activeColor, createHighlight, renderedHighlightRects]
   );
 
   const handleMouseUp = (e) => {
-    setTimeout(() => handleSelectionCheck(e, false), 60);
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    setTimeout(() => handleSelectionCheck({ clientX, clientY }, false), 60);
   };
 
   const handleDoubleClick = (e) => {
-    setTimeout(() => handleSelectionCheck(e, true), 30);
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    setTimeout(() => handleSelectionCheck({ clientX, clientY }, true), 40);
   };
 
   const handleTouchStart = (e) => {
@@ -593,6 +884,18 @@ export function Reader() {
     const touch = e.changedTouches?.[0];
     if (!touch) return;
 
+    const touchEventData = {
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+    };
+
+    // If active text selection exists, DO NOT navigate or turn page!
+    const activeText = window.getSelection()?.toString()?.trim();
+    if (activeText && activeText.length > 0) {
+      setTimeout(() => handleSelectionCheck(touchEventData, false), 50);
+      return;
+    }
+
     const startX = touchStartRef.current.x;
     const startY = touchStartRef.current.y;
     const deltaX = touch.clientX - startX;
@@ -605,6 +908,8 @@ export function Reader() {
     // Check if horizontal swipe gesture (at least 35px, mainly horizontal, within 500ms)
     if (Math.abs(deltaX) > 35 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2 && deltaTime < 500) {
       setShowSwipeReminder(false);
+      setSelectionPopover(null);
+      setSelectedHighlight(null);
       if (deltaX < 0) {
         // Swipe left -> Next Page
         setCurrentPage((p) => Math.min(totalPages, p + 1));
@@ -621,10 +926,10 @@ export function Reader() {
 
     if (timeDiff < 350) {
       lastTapRef.current = { time: 0, x: 0, y: 0 };
-      setTimeout(() => handleSelectionCheck(e, true), 50);
+      setTimeout(() => handleSelectionCheck(touchEventData, true), 60);
     } else {
       lastTapRef.current = { time: now, x: touch.clientX, y: touch.clientY };
-      setTimeout(() => handleSelectionCheck(e, false), 160);
+      setTimeout(() => handleSelectionCheck(touchEventData, false), 150);
     }
   };
 
@@ -742,13 +1047,106 @@ export function Reader() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const removeHighlight = (id) => {
-    if (user?.id) {
-      deleteHighlight(user.id, bookId, id);
-      setHighlights(getHighlights(user.id, bookId));
-      showToast('Highlight removed');
+  const removeHighlight = async (id) => {
+    if (!user?.id || !bookId) return;
+    setHighlights((prev) => (Array.isArray(prev) ? prev.filter((h) => h.id !== id) : []));
+    setSelectedHighlight(null);
+    showToast('Highlight removed');
+    try {
+      await deleteHighlight(user.id, bookId, id);
+    } catch (err) {
+      console.warn('Failed to delete highlight:', err);
     }
   };
+
+  const changeHighlightColor = async (id, newColor) => {
+    if (!user || !bookId) return;
+    setHighlights((prev) =>
+      (Array.isArray(prev) ? prev : []).map((h) => (h.id === id ? { ...h, color: newColor } : h))
+    );
+    setSelectedHighlight((prev) => (prev ? { ...prev, color: newColor } : null));
+    showToast('Highlight color updated');
+    try {
+      await updateHighlightColor(user.id, bookId, id, newColor);
+    } catch (err) {
+      console.warn('Failed to update highlight color:', err);
+    }
+  };
+
+  const handleExportNotes = useCallback(() => {
+    if (!highlights.length) return;
+    const bookTitle = book?.title || 'Book';
+    let md = `# Highlights & Notes: ${bookTitle}\n`;
+    if (book?.author) md += `*Author: ${book.author}*\n`;
+    md += `*Exported on ${new Date().toLocaleDateString()}*\n\n---\n\n`;
+
+    const sorted = [...highlights].sort((a, b) => Number(a.page) - Number(b.page));
+    sorted.forEach((h) => {
+      md += `> "${h.text}"\n\n— **Page ${h.page}**\n\n`;
+    });
+
+    navigator.clipboard.writeText(md);
+    showToast('📋 Highlights copied as Markdown notes!');
+  }, [highlights, book, showToast]);
+
+  const handleDownloadNotes = useCallback(() => {
+    if (!highlights.length) return;
+    const bookTitle = book?.title || 'Book';
+    let md = `# Highlights & Notes: ${bookTitle}\n`;
+    if (book?.author) md += `*Author: ${book.author}*\n`;
+    md += `*Exported on ${new Date().toLocaleDateString()}*\n\n---\n\n`;
+
+    const sorted = [...highlights].sort((a, b) => Number(a.page) - Number(b.page));
+    sorted.forEach((h) => {
+      md += `> "${h.text}"\n\n— **Page ${h.page}**\n\n`;
+    });
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(bookTitle || 'highlights').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_notes.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('💾 Notes downloaded as Markdown!');
+  }, [highlights, book, showToast]);
+
+  const handleJumpToHighlight = useCallback(
+    (h) => {
+      setCurrentPage(Number(h.page));
+      setShowSwipeReminder(false);
+      // If already on this page, highlight it visually
+      if (Number(h.page) === Number(currentPage)) {
+        const matching = renderedHighlightRects.find((r) => r.id === h.id);
+        if (matching && matching.rects[0]) {
+          const containerRect = textLayerRef.current?.getBoundingClientRect();
+          if (containerRect) {
+            setSelectedHighlight({
+              id: h.id,
+              text: h.text,
+              color: h.color,
+              page: h.page,
+              x: containerRect.left + matching.rects[0].left + matching.rects[0].width / 2,
+              y: containerRect.top + matching.rects[0].top,
+            });
+          }
+        }
+      }
+    },
+    [currentPage, renderedHighlightRects]
+  );
+
+  const filteredHighlights = useMemo(() => {
+    if (!Array.isArray(highlights)) return [];
+    let list = highlights;
+    if (highlightSearchQuery.trim()) {
+      const q = highlightSearchQuery.toLowerCase();
+      list = list.filter(
+        (h) => (h.text && h.text.toLowerCase().includes(q)) || String(h.page).includes(q)
+      );
+    }
+    return list;
+  }, [highlights, highlightSearchQuery]);
 
   const handleRepairFileUpload = async (e) => {
     const f = e.target.files?.[0];
@@ -779,11 +1177,6 @@ export function Reader() {
     }
   };
 
-  const pageHighlights = useMemo(
-    () => highlights.filter((h) => Number(h.page) === Number(currentPage)),
-    [highlights, currentPage]
-  );
-
   return (
     <div
       style={{ backgroundColor: themeConfig.bg, color: themeConfig.text }}
@@ -796,34 +1189,116 @@ export function Reader() {
         </div>
       )}
 
-      {/* Floating 1-Tap Highlight Toolbar */}
+      {/* Floating 1-Tap Highlight Toolbar (for newly selected text) */}
       {selectionPopover && (
         <div
           style={{ top: `${selectionPopover.top}px`, left: `${selectionPopover.left}px` }}
+          onMouseDown={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.stopPropagation()}
           className="fixed z-50 flex items-center gap-1.5 rounded-xl border border-white/20 bg-[#12232a] p-1.5 shadow-2xl backdrop-blur-lg animate-in fade-in zoom-in-95"
         >
           {HIGHLIGHT_COLORS.map((c) => (
             <button
               key={c.value}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 setActiveColor(c.value);
                 createHighlight(selectionPopover.text, c.value);
               }}
               title={`Highlight with ${c.name}`}
-              className="h-6 w-6 rounded-full transition hover:scale-110"
+              className="h-6 w-6 rounded-full transition hover:scale-110 active:scale-95 cursor-pointer"
               style={{ backgroundColor: c.value }}
             />
           ))}
           <div className="mx-1 h-4 w-[1px] bg-white/20" />
           <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
             onClick={() => createHighlight(selectionPopover.text, activeColor)}
-            className="inline-flex items-center gap-1 rounded-lg bg-[#009689] px-2.5 py-1 text-xs font-bold text-white transition hover:bg-[#007268]"
+            className="inline-flex items-center gap-1 rounded-lg bg-[#009689] px-2.5 py-1 text-xs font-bold text-white transition hover:bg-[#007268] active:scale-95 cursor-pointer"
           >
             <Highlighter size={13} /> Highlight
           </button>
           <button
-            onClick={() => setSelectionPopover(null)}
-            className="rounded-lg p-1 text-white/50 hover:bg-white/10 hover:text-white"
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              navigator.clipboard.writeText(selectionPopover.text);
+              showToast('Copied to clipboard');
+              setSelectionPopover(null);
+            }}
+            className="rounded-lg p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white cursor-pointer"
+            title="Copy selected text"
+          >
+            <Copy size={13} />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              setSelectionPopover(null);
+              window.getSelection()?.removeAllRanges();
+            }}
+            className="rounded-lg p-1.5 text-white/50 hover:bg-white/10 hover:text-white cursor-pointer"
+            title="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Floating Toolbar for Clicked Existing Highlight */}
+      {selectedHighlight && (
+        <div
+          style={{
+            top: `${Math.max(12, Math.min(window.innerHeight - 70, selectedHighlight.y - 54))}px`,
+            left: `${Math.max(12, Math.min(window.innerWidth - 260, selectedHighlight.x - 120))}px`,
+          }}
+          onMouseDown={(e) => e.preventDefault()}
+          onTouchStart={(e) => e.stopPropagation()}
+          className="fixed z-50 flex items-center gap-1.5 rounded-xl border border-white/20 bg-[#12232a] p-1.5 shadow-2xl backdrop-blur-lg animate-in fade-in zoom-in-95"
+        >
+          {HIGHLIGHT_COLORS.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => changeHighlightColor(selectedHighlight.id, c.value)}
+              title={`Change color to ${c.name}`}
+              className={`h-6 w-6 rounded-full transition hover:scale-110 active:scale-95 cursor-pointer ${
+                selectedHighlight.color === c.value ? 'ring-2 ring-white scale-110' : 'opacity-70 hover:opacity-100'
+              }`}
+              style={{ backgroundColor: c.value }}
+            />
+          ))}
+          <div className="mx-1 h-4 w-[1px] bg-white/20" />
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              copyHighlightText(selectedHighlight.text, selectedHighlight.id);
+            }}
+            className="rounded-lg p-1.5 text-white/70 transition hover:bg-white/10 hover:text-white cursor-pointer"
+            title="Copy quote"
+          >
+            <Copy size={13} />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => removeHighlight(selectedHighlight.id)}
+            className="rounded-lg p-1.5 text-red-400 transition hover:bg-red-500/20 hover:text-red-300 cursor-pointer"
+            title="Delete highlight"
+          >
+            <Trash2 size={13} />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setSelectedHighlight(null)}
+            className="rounded-lg p-1.5 text-white/50 hover:bg-white/10 hover:text-white cursor-pointer"
+            title="Dismiss"
           >
             <X size={14} />
           </button>
@@ -1087,6 +1562,46 @@ export function Reader() {
               {/* Canvas Rendering of the PDF page */}
               <canvas ref={canvasRef} className="block rounded-lg" />
 
+              {/* Visual Highlight Overlays Layer */}
+              <div
+                ref={highlightsLayerRef}
+                className="absolute inset-0 pointer-events-none rounded-lg overflow-hidden"
+                style={{ zIndex: 1 }}
+              >
+                {renderedHighlightRects.map((hl) => (
+                  <div key={hl.id} className="contents">
+                    {hl.rects.map((rect, idx) => (
+                      <div
+                        key={`${hl.id}-${idx}`}
+                        className="absolute transition-all hover:brightness-95 pointer-events-auto cursor-pointer"
+                        style={{
+                          left: `${rect.left}px`,
+                          top: `${rect.top}px`,
+                          width: `${rect.width}px`,
+                          height: `${rect.height}px`,
+                          backgroundColor: hexToRgba(hl.color, 0.42),
+                          borderBottom: `2.5px solid ${hl.color}`,
+                          borderRadius: '2px',
+                          mixBlendMode: 'multiply',
+                        }}
+                        title="Click to manage highlight"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedHighlight({
+                            id: hl.id,
+                            text: hl.text,
+                            color: hl.color,
+                            page: hl.page,
+                            x: e.clientX,
+                            y: e.clientY,
+                          });
+                        }}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+
               {/* Text Layer for Selection & Highlights */}
               <div
                 ref={textLayerRef}
@@ -1096,7 +1611,7 @@ export function Reader() {
 
               {/* Page Highlights Badge */}
               {pageHighlights.length > 0 && (
-                <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-full bg-[#0b1619]/90 px-3 py-1 text-xs font-medium text-[#ffd24c] shadow-lg backdrop-blur">
+                <div className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-full bg-[#0b1619]/90 px-3 py-1 text-xs font-medium text-[#ffd24c] shadow-lg backdrop-blur pointer-events-none">
                   <Sparkles size={13} />
                   <span>
                     {pageHighlights.length} highlight{pageHighlights.length > 1 ? 's' : ''} on this page
@@ -1160,7 +1675,7 @@ export function Reader() {
 
             <div className="mt-4">
               <p className="text-xs opacity-70">
-                <span className="font-bold text-[#009689]">Tip:</span> Double-tap or double-click any word or passage on the page to instantly highlight it!
+                <span className="font-bold text-[#009689]">Tip:</span> Double-tap or select any passage on the page to instantly highlight it!
               </p>
 
               {/* Color picker for default highlight color */}
@@ -1170,8 +1685,9 @@ export function Reader() {
                   {HIGHLIGHT_COLORS.map((c) => (
                     <button
                       key={c.value}
+                      type="button"
                       onClick={() => setActiveColor(c.value)}
-                      className={`h-5 w-5 rounded-full transition ${
+                      className={`h-5 w-5 rounded-full transition cursor-pointer ${
                         activeColor === c.value ? 'scale-125 ring-2 ring-white' : 'opacity-70 hover:opacity-100'
                       }`}
                       style={{ backgroundColor: c.value }}
@@ -1180,41 +1696,105 @@ export function Reader() {
                   ))}
                 </div>
               </div>
+
+              {/* Search filter for highlights */}
+              {highlights.length > 0 && (
+                <div className="relative mt-3">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" />
+                  <input
+                    type="text"
+                    placeholder="Search highlights & quotes..."
+                    value={highlightSearchQuery}
+                    onChange={(e) => setHighlightSearchQuery(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-white/5 py-1.5 pl-8 pr-8 text-xs text-white placeholder-white/40 outline-none focus:border-[#009689]"
+                  />
+                  {highlightSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setHighlightSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white cursor-pointer"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Quick Actions: Export & Download Notes */}
+              {highlights.length > 0 && (
+                <div className="mt-2.5 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportNotes}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-1.5 px-2 text-[11px] font-bold opacity-80 hover:bg-white/10 hover:opacity-100 transition active:scale-95 cursor-pointer"
+                    title="Copy all highlights formatted as Markdown notes"
+                  >
+                    <Copy size={12} />
+                    <span>Copy Notes</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadNotes}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/5 py-1.5 px-2.5 text-[11px] font-bold opacity-80 hover:bg-white/10 hover:opacity-100 transition active:scale-95 cursor-pointer"
+                    title="Download highlights as Markdown (.md)"
+                  >
+                    <Download size={12} />
+                    <span>.md</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
-              {highlights.length ? (
-                highlights.map((h) => {
+              {filteredHighlights.length ? (
+                filteredHighlights.map((h) => {
                   const isCurrent = Number(h.page) === Number(currentPage);
                   return (
                     <div
                       key={h.id}
                       className={`group relative rounded-2xl border p-3.5 transition ${
                         isCurrent
-                          ? 'border-[#009689] bg-[#009689]/10'
+                          ? 'border-[#009689] bg-[#009689]/10 shadow-sm'
                           : 'border-white/10 bg-white/5 hover:border-white/20'
                       }`}
                     >
                       <div className="flex items-center justify-between text-xs opacity-80">
                         <button
-                          onClick={() => {
-                            setCurrentPage(Number(h.page));
-                          }}
-                          className="font-bold text-[#009689] hover:underline"
+                          type="button"
+                          onClick={() => handleJumpToHighlight(h)}
+                          className="font-bold text-[#009689] hover:underline cursor-pointer"
+                          title="Jump to this page in book"
                         >
                           Page {h.page} {isCurrent && '• Viewing now'}
                         </button>
                         <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100">
+                          {/* Color Switcher */}
+                          <div className="hidden sm:flex items-center gap-1 mr-1">
+                            {HIGHLIGHT_COLORS.map((c) => (
+                              <button
+                                key={c.value}
+                                type="button"
+                                onClick={() => changeHighlightColor(h.id, c.value)}
+                                className={`h-3.5 w-3.5 rounded-full transition hover:scale-125 cursor-pointer ${
+                                  (h.color || '#ffd24c') === c.value ? 'ring-1 ring-white scale-110' : 'opacity-60'
+                                }`}
+                                style={{ backgroundColor: c.value }}
+                                title={`Change to ${c.name}`}
+                              />
+                            ))}
+                          </div>
                           <button
+                            type="button"
                             onClick={() => copyHighlightText(h.text, h.id)}
-                            className="rounded p-1 hover:bg-white/10"
+                            className="rounded p-1 hover:bg-white/10 cursor-pointer"
                             title="Copy text"
                           >
                             {copiedId === h.id ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
                           </button>
                           <button
+                            type="button"
                             onClick={() => removeHighlight(h.id)}
-                            className="rounded p-1 hover:bg-red-500/20 hover:text-red-300"
+                            className="rounded p-1 text-red-400 hover:bg-red-500/20 hover:text-red-300 cursor-pointer"
                             title="Delete highlight"
                           >
                             <Trash2 size={14} />
@@ -1222,14 +1802,28 @@ export function Reader() {
                         </div>
                       </div>
                       <p
-                        className="mt-2 rounded-lg p-2 text-xs leading-relaxed text-[#0b1619] shadow-sm"
+                        onClick={() => handleJumpToHighlight(h)}
+                        className="mt-2 rounded-lg p-2 text-xs leading-relaxed text-[#0b1619] shadow-xs cursor-pointer transition hover:opacity-95"
                         style={{ backgroundColor: h.color || '#ffd24c' }}
+                        title="Click to jump to page"
                       >
                         {h.text}
                       </p>
                     </div>
                   );
                 })
+              ) : highlightSearchQuery ? (
+                <div className="py-12 text-center opacity-50">
+                  <Search className="mx-auto mb-2" size={24} />
+                  <p className="text-xs font-bold">No highlights matching &ldquo;{highlightSearchQuery}&rdquo;</p>
+                  <button
+                    type="button"
+                    onClick={() => setHighlightSearchQuery('')}
+                    className="mt-2 text-[11px] font-bold text-[#009689] underline cursor-pointer"
+                  >
+                    Clear search filter
+                  </button>
+                </div>
               ) : (
                 <div className="py-16 text-center opacity-40">
                   <Highlighter className="mx-auto mb-2" size={32} />
