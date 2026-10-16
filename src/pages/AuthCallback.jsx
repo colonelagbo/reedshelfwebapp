@@ -2,7 +2,8 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import { api } from '../lib/api';
+import { api, authStorage } from '../lib/api';
+import { fetchBooks } from '../lib/appStore';
 import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
 
 export function AuthCallback() {
@@ -103,13 +104,15 @@ export function AuthCallback() {
         }
 
         if (res?.user?.id) {
-          localStorage.setItem('reedshelf_session', res.user.id);
+          localStorage.setItem('reedshelf_session_v1', res.user.id);
+          authStorage.setUser(res.user);
+          fetchBooks().catch(() => {});
         }
 
         setStatusText('Success! Taking you to ReedShelf...');
         setTimeout(() => {
           navigate('/app/home', { replace: true });
-        }, 300);
+        }, 200);
       } catch (err) {
         console.error('Auth callback error:', err);
         setError(err.message || 'Authentication failed. Please try signing in again.');

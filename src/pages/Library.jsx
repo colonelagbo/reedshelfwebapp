@@ -81,7 +81,7 @@ export function Library() {
         // Admins see all books in the database; regular users see their uploaded books
         const filtered = (activeId && !isAdmin) ? fetched.filter((b) => {
           const owner = b.uploadedBy || b.uploaded_by;
-          return !owner || owner === activeId || owner === 'demo_user';
+          return owner === activeId;
         }) : fetched;
         setBooks(filtered);
         setStorage(getUserStorageUsage(activeId));

@@ -76,7 +76,7 @@ booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
         try {
           let query = supabase.from('books').select('file_size, uploaded_by');
           if (!isUserAdmin) {
-            query = query.or(`uploaded_by.eq.${req.user.id},uploaded_by.eq.demo_user`);
+            query = query.eq('uploaded_by', req.user.id);
           }
           const { data, error } = await query;
           if (!error && Array.isArray(data) && data.length > 0) {
@@ -146,82 +146,54 @@ booksRouter.get('/storage-config', optionalToken, async (req, res) => {
   }
 });
 
-// GET /api/books - Get user's books (synchronized with Supabase PostgreSQL and merged with local store)
+// Cache timestamp for cloud sync throttle per server instance
+let lastCloudBooksSyncTime = 0;
+const BOOKS_SYNC_INTERVAL = 15000; // 15 seconds throttle
+
+// GET /api/books - Get user's books (instant local response + strict isolation + background sync)
 booksRouter.get('/', authenticateToken, async (req, res) => {
   try {
     const isUserAdmin = req.user.role === 'admin';
-    const supabase = getSupabaseClient();
+    const userId = req.user.id;
 
-    // 1. Synchronize from cloud storage metadata (ensures serverless lambdas never start blank)
-    try {
-      await syncBooksFromCloud();
-    } catch (syncErr) {
-      console.warn('[SyncBooks Notice]:', syncErr.message);
+    // Helper to query books from local database with strict user isolation
+    const queryLocalBooks = () => {
+      const rows = isUserAdmin
+        ? db.all('SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books ORDER BY created_at DESC')
+        : db.all(
+            'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? ORDER BY created_at DESC',
+            [userId]
+          );
+      return rows.map(formatBookRow);
+    };
+
+    let localBooks = queryLocalBooks();
+    const now = Date.now();
+
+    // Fast Path: If local database already has books and was synced recently, return immediately (<5ms)
+    if (localBooks.length > 0 && now - lastCloudBooksSyncTime < BOOKS_SYNC_INTERVAL) {
+      return res.json(localBooks);
     }
 
-    // 2. Fetch local books (authoritative fallback that preserves all uploaded books)
-    const localBooks = isUserAdmin
-      ? db.all('SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books ORDER BY created_at DESC')
-      : db.all(
-          'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? OR uploaded_by = "demo_user" OR uploaded_by IS NULL ORDER BY created_at DESC',
-          [req.user.id]
-        );
-
-    const booksMap = new Map();
-    for (const b of localBooks) {
-      booksMap.set(b.id, formatBookRow(b));
-    }
-
-    // 3. Ingest directly from Supabase Storage metadata/books.json as persistent cloud bucket backup
-    try {
-      const cloudMetadata = await supabaseStorage.getMetadata('books.json');
-      if (Array.isArray(cloudMetadata)) {
-        for (const b of cloudMetadata) {
-          const owner = b.uploadedBy || b.uploaded_by;
-          if (isUserAdmin || owner === req.user.id || owner === 'demo_user' || !owner) {
-            if (!booksMap.has(b.id)) {
-              booksMap.set(b.id, formatBookRow(b));
-            }
-          }
-        }
+    // If local database has 0 books (cold start on serverless or new instance), sync synchronously
+    if (localBooks.length === 0) {
+      try {
+        await Promise.race([
+          syncBooksFromCloud(true),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Sync timeout')), 2500))
+        ]);
+        lastCloudBooksSyncTime = Date.now();
+        localBooks = queryLocalBooks();
+      } catch (syncErr) {
+        console.warn('[SyncBooks Notice]:', syncErr.message);
       }
-    } catch (metaErr) {
-      console.warn('[Supabase Storage Metadata Notice]:', metaErr.message);
+    } else {
+      // Background non-blocking sync so user gets instant response
+      lastCloudBooksSyncTime = now;
+      syncBooksFromCloud().catch((err) => console.warn('[BgSyncBooks Warning]:', err.message));
     }
 
-    // 4. Fetch live books from Supabase PostgreSQL if configured and merge
-    if (config.isSupabaseConfigured()) {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        try {
-          let query = supabase.from('books').select('*').order('created_at', { ascending: false });
-          if (!isUserAdmin) {
-            query = query.or(`uploaded_by.eq.${req.user.id},uploaded_by.eq.demo_user`);
-          }
-          const { data, error } = await query;
-          if (!error && Array.isArray(data) && data.length > 0) {
-            for (const b of data) {
-              try {
-                db.run(
-                  `INSERT INTO books (id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(id) DO UPDATE SET title=excluded.title, author=excluded.author, file_size=excluded.file_size, total_pages=excluded.total_pages, r2_key=excluded.r2_key, cover_data_url=excluded.cover_data_url, cover_url=excluded.cover_url`,
-                  [b.id, b.title, b.author, b.file_name, b.file_type || 'application/pdf', b.file_size || 0, b.total_pages || 0, b.uploaded_by, b.r2_key, b.cover_data_url || null, b.cover_url || null, b.created_at]
-                );
-              } catch {}
-              booksMap.set(b.id, formatBookRow(b));
-            }
-          }
-        } catch (sbErr) {
-          console.warn('[Supabase Books Fetch Notice]:', sbErr.message);
-        }
-      }
-    }
-
-    const merged = Array.from(booksMap.values()).sort(
-      (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-    );
-    res.json(merged);
+    res.json(localBooks);
   } catch (err) {
     console.error('Error fetching books:', err);
     res.status(500).json({ error: 'Failed to retrieve books.' });
@@ -744,7 +716,7 @@ booksRouter.post('/:id/file', authenticateToken, upload.single('file'), async (r
     const isUserAdmin = req.user.role === 'admin';
     let book = isUserAdmin
       ? db.get('SELECT * FROM books WHERE id = ?', [bookId])
-      : db.get('SELECT * FROM books WHERE id = ? AND (uploaded_by = ? OR uploaded_by = "demo_user")', [bookId, req.user.id]);
+      : db.get('SELECT * FROM books WHERE id = ? AND uploaded_by = ?', [bookId, req.user.id]);
 
     if (!book) {
       return res.status(404).json({ error: 'Book not found or access denied.' });

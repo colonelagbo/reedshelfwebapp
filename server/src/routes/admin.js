@@ -3,11 +3,13 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
 import { config } from '../config.js';
-import { supabaseStorage } from '../storage/supabase.js';
+import { supabaseStorage, getSupabaseClient } from '../storage/supabase.js';
+import { r2Storage } from '../storage/r2.js';
+import { localStorageService } from '../storage/localStorage.js';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
 import { requireAdmin } from '../middleware/auth.js';
-import { syncUsersFromCloud, syncBooksFromCloud, recordUser } from '../storage/cloudSync.js';
+import { syncUsersFromCloud, syncBooksFromCloud, recordUser, removeUserFromCloud, removeBookFromCloud } from '../storage/cloudSync.js';
 
 export const adminRouter = express.Router();
 
@@ -599,10 +601,18 @@ adminRouter.delete('/users/:id', async (req, res) => {
     const userBooks = db.all('SELECT id, r2_key, file_size FROM books WHERE uploaded_by = ?', [targetId]);
     const totalBytesToClean = userBooks.reduce((acc, b) => acc + (Number(b.file_size) || 0), 0);
 
-    // 2. Delete Storage files from Supabase
+    // 2. Delete Storage files from R2, Local Server Storage, and Supabase Storage
     let deletedFilesCount = 0;
     for (const b of userBooks) {
       if (b.r2_key) {
+        if (config.isR2Configured()) {
+          try {
+            await r2Storage.delete(b.r2_key);
+          } catch {}
+        }
+        try {
+          await localStorageService.deleteBookFile(b.r2_key);
+        } catch {}
         try {
           await supabaseStorage.delete(b.r2_key);
           deletedFilesCount++;
@@ -624,10 +634,21 @@ adminRouter.delete('/users/:id', async (req, res) => {
       }
     }
 
-    // 4. Delete from local database (Cascades delete books, progress, plans, highlights, settings)
+    // 4. Delete from local database (Cascades delete books, progress, plans, highlights)
+    db.run('DELETE FROM reading_progress WHERE user_id = ?', [targetId]);
+    db.run('DELETE FROM highlights WHERE user_id = ?', [targetId]);
+    db.run('DELETE FROM reading_plans WHERE user_id = ?', [targetId]);
+    db.run('DELETE FROM books WHERE uploaded_by = ?', [targetId]);
     db.run('DELETE FROM users WHERE id = ?', [targetId]);
 
-    // 5. Log audit trail
+    // 5. Clean up from cloud storage metadata (users.json, books.json, plans.json) and Supabase DB tables
+    try {
+      await removeUserFromCloud(targetId);
+    } catch (cloudErr) {
+      console.warn('[Admin User Delete Warning] Cloud cleanup error:', cloudErr.message);
+    }
+
+    // 6. Log audit trail
     logAudit(req.user, 'user.delete', {
       targetType: 'user',
       targetId,
@@ -646,6 +667,89 @@ adminRouter.delete('/users/:id', async (req, res) => {
   } catch (err) {
     console.error('Delete user error:', err);
     res.status(500).json({ error: `Failed to delete user: ${err.message}` });
+  }
+});
+
+// ============================================================================
+// 8b. DELETE /api/admin/books/:id (Administrative Book Deletion + Storage Cleanup)
+// ============================================================================
+adminRouter.delete('/books/:id', async (req, res) => {
+  try {
+    const bookId = req.params.id;
+    let book = db.get('SELECT * FROM books WHERE id = ?', [bookId]);
+
+    const supabase = getSupabaseClient();
+    if (!book && supabase) {
+      try {
+        const { data } = await supabase.from('books').select('*').eq('id', bookId).single();
+        if (data) book = data;
+      } catch {}
+    }
+
+    if (!book) {
+      return res.status(404).json({ error: 'Book not found in platform catalog.' });
+    }
+
+    const storageKey = book.r2_key || book.r2Key;
+    const bookTitle = book.title || 'Untitled Book';
+    const fileSize = Number(book.file_size || book.size || 0);
+
+    // 1. Delete object from Cloudflare R2, Local Server Storage, and Supabase Storage
+    if (storageKey) {
+      if (config.isR2Configured()) {
+        try {
+          await r2Storage.delete(storageKey);
+        } catch {}
+      }
+      try {
+        await localStorageService.deleteBookFile(storageKey);
+      } catch {}
+      try {
+        await supabaseStorage.delete(storageKey);
+      } catch {}
+    }
+
+    // 2. Cascade delete from local DB
+    db.run('DELETE FROM reading_progress WHERE book_id = ?', [bookId]);
+    db.run('DELETE FROM highlights WHERE book_id = ?', [bookId]);
+    db.run('DELETE FROM reading_plans WHERE book_id = ?', [bookId]);
+    db.run('DELETE FROM books WHERE id = ?', [bookId]);
+
+    // 3. Cascade delete from Supabase PostgreSQL
+    if (supabase) {
+      try {
+        await supabase.from('reading_progress').delete().eq('book_id', bookId);
+        await supabase.from('highlights').delete().eq('book_id', bookId);
+        await supabase.from('reading_plans').delete().eq('book_id', bookId);
+        await supabase.from('books').delete().eq('id', bookId);
+      } catch {}
+    }
+
+    // 4. Remove from cloud bucket metadata (books.json)
+    try {
+      await removeBookFromCloud(bookId);
+    } catch (metaErr) {
+      console.warn('[Admin Book Delete Warning] Cloud metadata cleanup error:', metaErr.message);
+    }
+
+    // 5. Log audit trail
+    logAudit(req.user, 'book.delete', {
+      targetType: 'book',
+      targetId: bookId,
+      details: `Admin deleted book "${bookTitle}" (${formatBytes(fileSize)}) uploaded by user ${book.uploaded_by || 'unknown'}`
+    });
+
+    console.log(`[Admin] Successfully deleted book ${bookId} ("${bookTitle}")`);
+    res.json({
+      success: true,
+      message: `Book "${bookTitle}" has been permanently deleted from storage and catalog.`,
+      bookId,
+      cleanedBytes: fileSize,
+      formattedCleaned: formatBytes(fileSize)
+    });
+  } catch (err) {
+    console.error('Admin delete book error:', err);
+    res.status(500).json({ error: `Failed to delete book: ${err.message}` });
   }
 });
 

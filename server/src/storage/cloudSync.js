@@ -314,7 +314,7 @@ export async function syncBooksFromCloud(force = false) {
                 b.file_type || b.fileType || 'application/pdf',
                 b.file_size || b.size || 0,
                 b.total_pages || b.totalPages || 0,
-                b.uploaded_by || b.uploadedBy || 'demo_user',
+                b.uploaded_by || b.uploadedBy || null,
                 b.r2_key || b.r2Key || null,
                 b.cover_data_url || b.coverDataUrl || null,
                 b.cover_url || b.coverUrl || null,
@@ -390,15 +390,71 @@ export async function recordBook(book) {
 }
 
 /**
- * Remove a book from cloud metadata
+ * Remove a book from cloud metadata and Supabase PostgreSQL
  */
 export async function removeBookFromCloud(bookId) {
   try {
     const cloudBooks = (await supabaseStorage.getMetadata('books.json')) || [];
-    const filtered = cloudBooks.filter((b) => b.id !== bookId);
+    const filtered = cloudBooks.filter((b) => b && b.id !== bookId);
     await supabaseStorage.saveMetadata('books.json', filtered);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('reading_progress').delete().eq('book_id', bookId);
+        await supabase.from('highlights').delete().eq('book_id', bookId);
+        await supabase.from('reading_plans').delete().eq('book_id', bookId);
+        await supabase.from('books').delete().eq('id', bookId);
+      } catch (sbErr) {
+        console.warn('[CloudSync] removeBook Supabase DB cleanup notice:', sbErr.message);
+      }
+    }
   } catch (err) {
     console.warn('[CloudSync] removeBook notice:', err.message);
+  }
+}
+
+/**
+ * Remove a user and all their books from cloud storage metadata and Supabase PostgreSQL
+ */
+export async function removeUserFromCloud(userId) {
+  try {
+    // 1. Remove user from users.json
+    const cloudUsers = (await supabaseStorage.getMetadata('users.json')) || [];
+    const filteredUsers = cloudUsers.filter((u) => u && u.id !== userId);
+    await supabaseStorage.saveMetadata('users.json', filteredUsers);
+
+    // 2. Remove all user's books from books.json
+    const cloudBooks = (await supabaseStorage.getMetadata('books.json')) || [];
+    const filteredBooks = cloudBooks.filter((b) => {
+      const owner = b && (b.uploaded_by || b.uploadedBy);
+      return owner !== userId;
+    });
+    await supabaseStorage.saveMetadata('books.json', filteredBooks);
+
+    // 3. Remove all user's reading plans from plans.json
+    const cloudPlans = (await supabaseStorage.getMetadata('plans.json')) || [];
+    const filteredPlans = cloudPlans.filter((p) => {
+      const owner = p && (p.user_id || p.userId);
+      return owner !== userId;
+    });
+    await supabaseStorage.saveMetadata('plans.json', filteredPlans);
+
+    // 4. Clean up Supabase PostgreSQL tables
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('reading_progress').delete().eq('user_id', userId);
+        await supabase.from('highlights').delete().eq('user_id', userId);
+        await supabase.from('reading_plans').delete().eq('user_id', userId);
+        await supabase.from('books').delete().eq('uploaded_by', userId);
+        await supabase.from('users').delete().eq('id', userId);
+      } catch (sbErr) {
+        console.warn('[CloudSync] removeUser Supabase DB cleanup notice:', sbErr.message);
+      }
+    }
+  } catch (err) {
+    console.warn('[CloudSync] removeUser notice:', err.message);
   }
 }
 
@@ -496,9 +552,10 @@ export async function syncPlansFromCloud(force = false) {
  */
 export async function recordPlanInCloud(plan) {
   try {
+    const cloudPlans = (await supabaseStorage.getMetadata('plans.json')) || [];
     const targetUserId = plan.userId || plan.user_id;
     const targetBookId = plan.bookId || plan.book_id;
-    const filtered = cloudPlans.filter((p) => p.id !== plan.id && !(p.user_id === targetUserId && p.book_id === targetBookId));
+    const filtered = cloudPlans.filter((p) => p && p.id !== plan.id && !(p.user_id === targetUserId && p.book_id === targetBookId));
     filtered.unshift({
       id: plan.id,
       user_id: plan.userId || plan.user_id,

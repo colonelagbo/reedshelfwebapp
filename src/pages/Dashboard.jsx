@@ -20,7 +20,7 @@ export function Dashboard() {
           const isAdmin = user?.role === 'admin';
           const filtered = (user?.id && !isAdmin) ? b.filter((item) => {
             const owner = item.uploadedBy || item.uploaded_by;
-            return !owner || owner === user.id || owner === 'demo_user';
+            return owner === user.id;
           }) : b;
           setBooks(filtered);
         }

@@ -428,6 +428,12 @@ export const api = {
       return await apiRequest(`/api/admin/books${qs ? `?${qs}` : ''}`);
     },
 
+    async deleteBook(id) {
+      return await apiRequest(`/api/admin/books/${id}`, {
+        method: 'DELETE',
+      });
+    },
+
     async getReadingActivity() {
       return await apiRequest('/api/admin/reading-activity');
     },

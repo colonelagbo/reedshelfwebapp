@@ -85,6 +85,8 @@ export async function loginUser({ email, password }) {
         users.unshift(userToCache);
       }
       write(USERS_KEY, users);
+      // Immediately prefetch books in the background so library/dashboard load with zero delay
+      fetchBooks().catch(() => {});
     }
     return res.user;
   } catch (err) {
@@ -95,6 +97,7 @@ export async function loginUser({ email, password }) {
     if (!user) throw new Error(err.message || 'Incorrect email or password.');
     localStorage.setItem(SESSION_KEY, user.id);
     authStorage.setUser(user);
+    fetchBooks().catch(() => {});
     return user;
   }
 }
@@ -118,6 +121,7 @@ export async function loginWithGoogle({ email, name, avatar, googleId }) {
         users.unshift(res.user);
       }
       write(USERS_KEY, users);
+      fetchBooks().catch(() => {});
     }
     return res.user;
   } catch (err) {
@@ -139,6 +143,7 @@ export async function loginWithGoogle({ email, name, avatar, googleId }) {
     }
     localStorage.setItem(SESSION_KEY, user.id);
     authStorage.setUser(user);
+    fetchBooks().catch(() => {});
     return user;
   }
 }
@@ -158,6 +163,7 @@ export async function verify2FALogin({ tempToken, code }) {
       users.unshift(res.user);
     }
     write(USERS_KEY, users);
+    fetchBooks().catch(() => {});
   }
   return res.user;
 }
@@ -165,6 +171,11 @@ export async function verify2FALogin({ tempToken, code }) {
 export function logoutUser() {
   api.auth.logout();
   localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(BOOKS_KEY);
+  localStorage.removeItem(PROGRESS_KEY);
+  localStorage.removeItem(PLANS_KEY);
+  localStorage.removeItem(HIGHLIGHTS_KEY);
+  notifyBooksChanged();
 }
 
 export async function updateUser(userId, changes) {
@@ -278,12 +289,12 @@ export const getBooks = () => {
 
 export const getUserBooks = (userId) => {
   const books = getBooks();
-  if (!userId) return books;
+  if (!userId) return [];
   const user = getCurrentUser();
   if (user?.role === 'admin') return books;
   return books.filter((b) => {
     const owner = b.uploadedBy || b.uploaded_by;
-    return !owner || owner === userId;
+    return owner === userId;
   });
 };
 
@@ -350,18 +361,27 @@ export async function fetchBooks() {
   const user = getCurrentUser();
   const deletedSet = new Set(getDeletedBookIds());
   const localBooks = getBooks();
+  const isAdmin = user?.role === 'admin';
 
   // 1. Try fetching from Backend API
   try {
     const books = await api.books.list();
     if (Array.isArray(books)) {
-      const cleanBooks = books.filter((b) => b && b.id && !deletedSet.has(b.id) && !isTestBook(b));
+      const cleanBooks = books.filter((b) => {
+        if (!b || !b.id || deletedSet.has(b.id) || isTestBook(b)) return false;
+        if (isAdmin) return true;
+        const owner = b.uploadedBy || b.uploaded_by;
+        return owner === user?.id;
+      });
 
-      // Merge remote books with existing local cache so newly recorded uploads never disappear
+      // Merge remote books with existing local cache strictly matching user
       const bookMap = new Map();
       for (const b of localBooks) {
         if (b && b.id && !deletedSet.has(b.id) && !isTestBook(b)) {
-          bookMap.set(b.id, b);
+          const owner = b.uploadedBy || b.uploaded_by;
+          if (isAdmin || owner === user?.id) {
+            bookMap.set(b.id, b);
+          }
         }
       }
       for (const b of cleanBooks) {
@@ -383,8 +403,8 @@ export async function fetchBooks() {
     try {
       if (user?.id) {
         let query = supabase.from('books').select('*');
-        if (user.role !== 'admin') {
-          query = query.or(`uploaded_by.eq.${user.id},uploaded_by.eq.demo_user`);
+        if (!isAdmin) {
+          query = query.eq('uploaded_by', user.id);
         }
         const { data, error } = await query.order('created_at', { ascending: false });
 
@@ -392,7 +412,10 @@ export async function fetchBooks() {
           const bookMap = new Map();
           for (const b of localBooks) {
             if (b && b.id && !deletedSet.has(b.id) && !isTestBook(b)) {
-              bookMap.set(b.id, b);
+              const owner = b.uploadedBy || b.uploaded_by;
+              if (isAdmin || owner === user?.id) {
+                bookMap.set(b.id, b);
+              }
             }
           }
           for (const b of data) {
@@ -411,7 +434,9 @@ export async function fetchBooks() {
               createdAt: b.created_at,
             };
             if (!deletedSet.has(formatted.id) && !isTestBook(formatted)) {
-              bookMap.set(formatted.id, formatted);
+              if (isAdmin || formatted.uploadedBy === user?.id) {
+                bookMap.set(formatted.id, formatted);
+              }
             }
           }
           const clean = Array.from(bookMap.values()).sort(
@@ -427,7 +452,10 @@ export async function fetchBooks() {
     }
   }
 
-  // 3. Keep local books cache, never wipe out books on temporary network failure
+  // 3. Keep local books cache, filtered to user
+  if (user?.id && !isAdmin) {
+    return localBooks.filter((b) => (b.uploadedBy || b.uploaded_by) === user.id);
+  }
   return localBooks;
 }
 
