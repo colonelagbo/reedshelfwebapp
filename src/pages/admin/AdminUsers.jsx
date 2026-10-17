@@ -63,7 +63,16 @@ export function AdminUsers() {
         page: pagination.page,
         limit: pagination.limit
       });
-      setUsers(res.users || []);
+      const rawUsers = res.users || [];
+      const seen = new Set();
+      const dedupedUsers = [];
+      for (const u of rawUsers) {
+        const key = (u.email || u.id || '').trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        dedupedUsers.push(u);
+      }
+      setUsers(dedupedUsers);
       setPagination(res.pagination || { page: 1, limit: 15, total: 0, totalPages: 1 });
     } catch (err) {
       console.error('Failed to fetch users:', err);

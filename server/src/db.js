@@ -180,12 +180,32 @@ class JsonStoreAdapter {
         const raw = fs.readFileSync(this.filePath, 'utf-8');
         this.data = { ...this.data, ...JSON.parse(raw) };
         if (Array.isArray(this.data.users)) {
-          this.data.users = this.data.users.map((u) => ({
-            ...u,
-            two_factor_enabled: Boolean(u.two_factor_enabled || false),
-            two_factor_secret: u.two_factor_secret || null,
-            google_id: u.google_id || null,
-          }));
+          const userMap = new Map();
+          for (const u of this.data.users) {
+            if (!u || !u.email) continue;
+            const normEmail = (u.email || '').trim().toLowerCase();
+            const existing = userMap.get(normEmail);
+            if (!existing) {
+              userMap.set(normEmail, {
+                ...u,
+                email: normEmail,
+                two_factor_enabled: Boolean(u.two_factor_enabled || false),
+                two_factor_secret: u.two_factor_secret || null,
+                google_id: u.google_id || null,
+              });
+            } else {
+              // Merge details: retain avatar, role, password, 2FA
+              if (!existing.avatar && u.avatar) existing.avatar = u.avatar;
+              if (u.role === 'admin') existing.role = 'admin';
+              if (!existing.password && u.password) existing.password = u.password;
+              if (u.two_factor_enabled) {
+                existing.two_factor_enabled = true;
+                existing.two_factor_secret = u.two_factor_secret || existing.two_factor_secret;
+              }
+              if (u.google_id && !existing.google_id) existing.google_id = u.google_id;
+            }
+          }
+          this.data.users = Array.from(userMap.values());
         }
       }
     } catch (e) {
@@ -310,6 +330,18 @@ function queryFallback(sql, params, mode) {
         };
       });
 
+      // Deduplicate users by normalized email so duplicates never appear
+      const seenUserEmails = new Set();
+      const dedupedList = [];
+      for (const u of userList) {
+        const key = (u.email || u.id || '').trim().toLowerCase();
+        if (!seenUserEmails.has(key)) {
+          seenUserEmails.add(key);
+          dedupedList.push(u);
+        }
+      }
+      userList = dedupedList;
+
       // Filters
       if (params.length > 0 && lower.includes('like ?')) {
         const term = String(params[0]).replace(/%/g, '').toLowerCase();
@@ -423,22 +455,46 @@ function queryFallback(sql, params, mode) {
 
     if (lower.includes('count(*) as count from users where created_at >= ?') && params.length >= 1) {
       const threshold = params[0];
-      const count = jsonStore.data.users.filter(u => u.created_at >= threshold).length;
+      const seen = new Set();
+      const count = jsonStore.data.users.filter(u => {
+        const k = (u.email || u.id || '').trim().toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return u.created_at >= threshold;
+      }).length;
       return mode === 'get' ? { count } : [{ count }];
     }
 
     if (lower.includes('count(*) as count from users where role = \'admin\' and status = \'active\'')) {
-      const count = jsonStore.data.users.filter(u => u.role === 'admin' && u.status === 'active').length;
+      const seen = new Set();
+      const count = jsonStore.data.users.filter(u => {
+        const k = (u.email || u.id || '').trim().toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return u.role === 'admin' && u.status === 'active';
+      }).length;
       return mode === 'get' ? { count } : [{ count }];
     }
 
     if (lower.includes('count(*) as count from users where role = \'admin\'')) {
-      const count = jsonStore.data.users.filter(u => u.role === 'admin').length;
+      const seen = new Set();
+      const count = jsonStore.data.users.filter(u => {
+        const k = (u.email || u.id || '').trim().toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return u.role === 'admin';
+      }).length;
       return mode === 'get' ? { count } : [{ count }];
     }
 
     if (lower.includes('count(*) as count from users')) {
-      const count = jsonStore.data.users.length;
+      const seen = new Set();
+      const count = jsonStore.data.users.filter(u => {
+        const k = (u.email || u.id || '').trim().toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      }).length;
       return mode === 'get' ? { count } : [{ count }];
     }
 
@@ -459,7 +515,15 @@ function queryFallback(sql, params, mode) {
 
     // E. General table queries
     let table = null;
-    if (lower.includes('from users')) table = jsonStore.data.users;
+    if (lower.includes('from users')) {
+      const seen = new Set();
+      table = jsonStore.data.users.filter(u => {
+        const k = (u.email || u.id || '').trim().toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    }
     else if (lower.includes('from books')) table = jsonStore.data.books;
     else if (lower.includes('from reading_progress')) table = jsonStore.data.reading_progress;
     else if (lower.includes('from reading_plans')) table = jsonStore.data.reading_plans;
@@ -527,10 +591,12 @@ function queryFallback(sql, params, mode) {
     if (target) {
       if (lower.includes('into users')) {
         const [id, name, email, password, avatar, role, status, created_at, two_factor_enabled, two_factor_secret, google_id] = params;
-        target.push({
-          id,
-          name,
-          email,
+        const normEmail = (email || '').trim().toLowerCase();
+        const existIdx = target.findIndex(u => u.id === id || (u.email || '').trim().toLowerCase() === normEmail);
+        const userObj = {
+          id: existIdx >= 0 ? target[existIdx].id : id,
+          name: name ? name.trim() : 'Reader',
+          email: normEmail || email,
           password: password || '',
           avatar: avatar || null,
           role: role || 'user',
@@ -539,7 +605,17 @@ function queryFallback(sql, params, mode) {
           two_factor_secret: two_factor_secret || null,
           google_id: google_id || null,
           created_at: created_at || new Date().toISOString()
-        });
+        };
+        if (existIdx >= 0) {
+          target[existIdx] = {
+            ...target[existIdx],
+            ...userObj,
+            password: userObj.password || target[existIdx].password,
+            avatar: userObj.avatar || target[existIdx].avatar
+          };
+        } else {
+          target.push(userObj);
+        }
       } else if (lower.includes('into books')) {
         const [id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at] = params;
         const existIdx = target.findIndex(b => b.id === id);
@@ -669,14 +745,16 @@ function queryFallback(sql, params, mode) {
   // 4. DELETE QUERIES
   if (lower.startsWith('delete')) {
     if (lower.includes('from users') && params.length >= 1) {
-      const userId = params[0];
-      jsonStore.data.users = jsonStore.data.users.filter(u => u.id !== userId);
-      jsonStore.data.books = jsonStore.data.books.filter(b => b.uploaded_by !== userId);
-      jsonStore.data.reading_progress = jsonStore.data.reading_progress.filter(p => p.user_id !== userId);
-      jsonStore.data.reading_plans = jsonStore.data.reading_plans.filter(p => p.user_id !== userId);
-      jsonStore.data.highlights = jsonStore.data.highlights.filter(h => h.user_id !== userId);
-      jsonStore.data.user_settings = jsonStore.data.user_settings.filter(s => s.user_id !== userId);
-      jsonStore.data.reading_activity = jsonStore.data.reading_activity.filter(a => a.user_id !== userId);
+      const targetParam = String(params[0]).toLowerCase();
+      const userToDelete = jsonStore.data.users.find(u => u.id === params[0] || (u.email && u.email.toLowerCase() === targetParam));
+      const targetUserId = userToDelete?.id || params[0];
+      jsonStore.data.users = jsonStore.data.users.filter(u => u.id !== targetUserId && (!u.email || u.email.toLowerCase() !== targetParam));
+      jsonStore.data.books = jsonStore.data.books.filter(b => b.uploaded_by !== targetUserId);
+      jsonStore.data.reading_progress = jsonStore.data.reading_progress.filter(p => p.user_id !== targetUserId);
+      jsonStore.data.reading_plans = jsonStore.data.reading_plans.filter(p => p.user_id !== targetUserId);
+      jsonStore.data.highlights = jsonStore.data.highlights.filter(h => h.user_id !== targetUserId);
+      jsonStore.data.user_settings = jsonStore.data.user_settings.filter(s => s.user_id !== targetUserId);
+      jsonStore.data.reading_activity = jsonStore.data.reading_activity.filter(a => a.user_id !== targetUserId);
     } else if (lower.includes('from books') && params.length >= 1) {
       jsonStore.data.books = jsonStore.data.books.filter(b => b.id !== params[0]);
       jsonStore.data.reading_progress = jsonStore.data.reading_progress.filter(p => p.book_id !== params[0]);

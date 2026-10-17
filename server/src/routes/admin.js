@@ -111,21 +111,29 @@ adminRouter.get('/overview', async (req, res) => {
       LEFT JOIN books b ON b.uploaded_by = u.id
       GROUP BY u.id
       ORDER BY storage_bytes DESC
-      LIMIT 5
+      LIMIT 10
     `);
 
-    const topStorageUsers = topUsersRaw.map(u => ({
-      id: u.id,
-      name: u.name,
-      email: u.email,
-      avatar: u.avatar,
-      role: u.role || 'user',
-      status: u.status || 'active',
-      booksCount: Number(u.books_count || 0),
-      storageUsedBytes: Number(u.storage_bytes || 0),
-      formattedStorage: formatBytes(Number(u.storage_bytes || 0)),
-      createdAt: u.created_at
-    }));
+    const seenTop = new Set();
+    const topStorageUsers = [];
+    for (const u of topUsersRaw) {
+      const key = (u.email || u.id || '').trim().toLowerCase();
+      if (!key || seenTop.has(key)) continue;
+      seenTop.add(key);
+      topStorageUsers.push({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        avatar: u.avatar,
+        role: u.role || 'user',
+        status: u.status || 'active',
+        booksCount: Number(u.books_count || 0),
+        storageUsedBytes: Number(u.storage_bytes || 0),
+        formattedStorage: formatBytes(Number(u.storage_bytes || 0)),
+        createdAt: u.created_at
+      });
+      if (topStorageUsers.length >= 5) break;
+    }
 
     // Recent 6 audit logs
     const recentAudit = db.all('SELECT * FROM admin_audit_logs ORDER BY created_at DESC LIMIT 6');
@@ -261,10 +269,18 @@ adminRouter.get('/storage/users', async (req, res) => {
     }
 
     const allMatched = db.all(sql, params);
-    const total = allMatched.length;
+    const seenStorageUsers = new Set();
+    const dedupedMatched = [];
+    for (const u of allMatched) {
+      const key = (u.email || u.id || '').trim().toLowerCase();
+      if (!key || seenStorageUsers.has(key)) continue;
+      seenStorageUsers.add(key);
+      dedupedMatched.push(u);
+    }
+    const total = dedupedMatched.length;
     const totalPages = Math.ceil(total / limitNum) || 1;
     const offset = (pageNum - 1) * limitNum;
-    const pageItems = allMatched.slice(offset, offset + limitNum);
+    const pageItems = dedupedMatched.slice(offset, offset + limitNum);
 
     const users = pageItems.map(u => ({
       id: u.id,
@@ -350,10 +366,18 @@ adminRouter.get('/users', async (req, res) => {
     }
 
     const allMatched = db.all(sql, params);
-    const total = allMatched.length;
+    const seenMatchedUsers = new Set();
+    const dedupedMatched = [];
+    for (const u of allMatched) {
+      const key = (u.email || u.id || '').trim().toLowerCase();
+      if (!key || seenMatchedUsers.has(key)) continue;
+      seenMatchedUsers.add(key);
+      dedupedMatched.push(u);
+    }
+    const total = dedupedMatched.length;
     const totalPages = Math.ceil(total / limitNum) || 1;
     const offset = (pageNum - 1) * limitNum;
-    const pageItems = allMatched.slice(offset, offset + limitNum);
+    const pageItems = dedupedMatched.slice(offset, offset + limitNum);
 
     const users = pageItems.map(u => ({
       id: u.id,
