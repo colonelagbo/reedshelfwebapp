@@ -16,6 +16,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
+import { useTheme } from '../lib/theme';
 import {
   getCurrentUser,
   getSettings,
@@ -48,6 +49,7 @@ const Toggle = ({ value, onChange, label }) => (
 );
 
 export function Settings() {
+  const { theme, setTheme } = useTheme();
   const initialUser = getCurrentUser();
   const [user, setUser] = useState(initialUser);
   const [name, setName] = useState(initialUser?.name || '');
@@ -62,7 +64,10 @@ export function Settings() {
 
   // Appearance & Shelf Settings States
   const initialSettings = getSettings(initialUser?.id);
-  const [settings, setSettings] = useState(initialSettings);
+  const [settings, setSettings] = useState({
+    ...initialSettings,
+    darkMode: theme === 'dark',
+  });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
@@ -98,12 +103,14 @@ export function Settings() {
     fetchSettings()
       .then((remote) => {
         if (remote) {
-          setSettings(remote);
-          document.documentElement.classList.toggle('dark', Boolean(remote.darkMode));
+          setSettings({
+            ...remote,
+            darkMode: theme === 'dark',
+          });
         }
       })
       .catch(() => {});
-  }, [user?.id]);
+  }, [user?.id, theme]);
 
   // Handle avatar file selection & cloud upload
   const handleAvatarFile = async (e) => {
@@ -196,8 +203,8 @@ export function Settings() {
     setSavingSettings(true);
 
     try {
-      await saveSettings(user.id, newSettings);
-      document.documentElement.classList.toggle('dark', Boolean(newSettings.darkMode));
+      const merged = { ...newSettings, darkMode: theme === 'dark' };
+      await saveSettings(user.id, merged);
       setSettingsSaved(true);
       setTimeout(() => setSettingsSaved(false), 2000);
     } catch (err) {
@@ -208,11 +215,12 @@ export function Settings() {
   };
 
   const updateSetting = (key, value) => {
+    if (key === 'darkMode') {
+      const nextTheme = value ? 'dark' : 'light';
+      setTheme(nextTheme);
+    }
     const next = { ...settings, [key]: value };
     setSettings(next);
-    if (key === 'darkMode') {
-      document.documentElement.classList.toggle('dark', Boolean(value));
-    }
     handleSaveSettings(next);
   };
 
@@ -459,7 +467,7 @@ export function Settings() {
           <section className="rounded-3xl border border-[#e4e1d6] bg-white p-5 sm:p-7 shadow-xs dark:border-white/10 dark:bg-[#142326]">
             <div className="flex items-center gap-3 border-b border-[#e4e1d6]/70 pb-4 dark:border-white/10">
               <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
-                {settings.darkMode ? <Moon size={20} /> : <Sun size={20} />}
+                {theme === 'dark' ? <Moon size={20} /> : <Sun size={20} />}
               </span>
               <div>
                 <h2 className="text-base sm:text-lg font-bold text-[#0b1619] dark:text-white">
@@ -483,7 +491,7 @@ export function Settings() {
                   </p>
                 </div>
                 <Toggle
-                  value={settings.darkMode}
+                  value={theme === 'dark'}
                   onChange={(v) => updateSetting('darkMode', v)}
                   label="Toggle dark mode"
                 />

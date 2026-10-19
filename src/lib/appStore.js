@@ -831,10 +831,16 @@ const defaultSettings = {
   reducedMotion: false,
 };
 
-export const getSettings = (userId) => ({
-  ...defaultSettings,
-  ...(read(SETTINGS_KEY, {})[userId] || {}),
-});
+export const getSettings = (userId) => {
+  const activeIsDark = typeof window !== 'undefined'
+    ? (localStorage.getItem('reedshelf-theme') === 'dark' || document.documentElement.classList.contains('dark'))
+    : false;
+  return {
+    ...defaultSettings,
+    darkMode: activeIsDark,
+    ...(read(SETTINGS_KEY, {})[userId] || {}),
+  };
+};
 
 export async function fetchSettings() {
   try {
@@ -857,6 +863,15 @@ export async function saveSettings(userId, changes) {
   const merged = { ...getSettings(userId), ...changes };
   all[userId] = merged;
   write(SETTINGS_KEY, all);
+
+  if (changes.darkMode !== undefined && typeof window !== 'undefined') {
+    const themeStr = changes.darkMode ? 'dark' : 'light';
+    try {
+      localStorage.setItem('reedshelf-theme', themeStr);
+      document.documentElement.classList.toggle('dark', Boolean(changes.darkMode));
+      document.documentElement.style.colorScheme = themeStr;
+    } catch {}
+  }
 
   try {
     await api.settings.save(merged);
