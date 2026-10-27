@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, Smartphone, Download } from 'lucide-react';
 import { AuthLayout } from '../components/AuthLayout';
@@ -12,10 +12,23 @@ export function Register() {
   const [loading, setLoading] = useState(false);
   const [twoFactorData, setTwoFactorData] = useState(null);
   const navigate = useNavigate();
-  const isStandalone = typeof window !== 'undefined' && (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.navigator.standalone === true
-  );
+  const [isStandalone, setIsStandalone] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true
+    );
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(display-mode: standalone)');
+    const onChange = (e) => setIsStandalone(e.matches || window.navigator.standalone === true);
+    if (media.addEventListener) {
+      media.addEventListener('change', onChange);
+      return () => media.removeEventListener('change', onChange);
+    }
+  }, []);
 
   const handleAuthSuccess = () => {
     navigate('/app/home', { replace: true });
@@ -103,10 +116,12 @@ export function Register() {
           <button
             type="button"
             onClick={() => window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'))}
-            className="inline-flex min-h-[36px] items-center gap-1 rounded-xl bg-[#009689] px-3 py-1.5 text-xs font-bold text-white shadow-2xs transition hover:bg-[#007268] active:scale-95 touch-manipulation shrink-0 ml-2"
+            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl bg-[#009689] px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs transition hover:bg-[#007268] active:scale-95 touch-manipulation shrink-0 ml-2 cursor-pointer"
+            title="Download & Install ReedShelf App"
+            aria-label="Download & Install ReedShelf App"
           >
             <Download size={13} />
-            <span>Install</span>
+            <span>Download</span>
           </button>
         </div>
       )}

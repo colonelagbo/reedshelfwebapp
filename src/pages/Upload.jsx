@@ -145,7 +145,10 @@ export function Upload() {
 
       let book;
       const currentUser = getCurrentUser();
-      const currentUserId = currentUser?.id || user?.id || 'demo_user';
+      const currentUserId = currentUser?.id || user?.id;
+      if (!currentUserId) {
+        throw new Error('You must be signed in to upload a book.');
+      }
 
       // 1. Storage quota check
       const currentStorage = getUserStorageUsage(currentUserId);

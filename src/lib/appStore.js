@@ -4,6 +4,7 @@ import { supabase, isSupabaseConfigured } from './supabaseClient';
 const USERS_KEY = 'reedshelf_users_v1';
 const SESSION_KEY = 'reedshelf_session_v1';
 const BOOKS_KEY = 'reedshelf_books_v1';
+export const getUserBooksKey = (userId) => (userId ? `reedshelf_books_${userId}_v1` : BOOKS_KEY);
 const PROGRESS_KEY = 'reedshelf_progress_v1';
 const PLANS_KEY = 'reedshelf_plans_v1';
 const SETTINGS_KEY = 'reedshelf_settings_v1';
@@ -50,6 +51,10 @@ export async function registerUser({ name, email, password, code, setup2FA }) {
   if (res.user?.id) {
     localStorage.setItem(SESSION_KEY, res.user.id);
     authStorage.setUser(res.user);
+    // Load this specific user's scoped cached books immediately so dashboard renders populated
+    const cachedBooks = read(getUserBooksKey(res.user.id), []);
+    write(BOOKS_KEY, cachedBooks);
+    notifyBooksChanged();
     const users = getUsers();
     const existingIndex = users.findIndex(
       (u) => u.id === res.user.id || (u.email || '').toLowerCase() === (res.user.email || '').toLowerCase()
@@ -61,6 +66,12 @@ export async function registerUser({ name, email, password, code, setup2FA }) {
       users.unshift(userToCache);
     }
     write(USERS_KEY, users);
+    try {
+      await Promise.race([
+        fetchBooks(),
+        new Promise((resolve) => setTimeout(resolve, 800)),
+      ]);
+    } catch {}
   }
   return res.user;
 }
@@ -74,6 +85,10 @@ export async function loginUser({ email, password }) {
     if (res.user?.id) {
       localStorage.setItem(SESSION_KEY, res.user.id);
       authStorage.setUser(res.user);
+      // Load this specific user's scoped cached books immediately so dashboard renders populated
+      const cachedBooks = read(getUserBooksKey(res.user.id), []);
+      write(BOOKS_KEY, cachedBooks);
+      notifyBooksChanged();
       const users = getUsers();
       const existingIndex = users.findIndex(
         (u) => u.id === res.user.id || (u.email || '').toLowerCase() === (res.user.email || '').toLowerCase()
@@ -85,8 +100,13 @@ export async function loginUser({ email, password }) {
         users.unshift(userToCache);
       }
       write(USERS_KEY, users);
-      // Immediately prefetch books in the background so library/dashboard load with zero delay
-      fetchBooks().catch(() => {});
+      // Pre-fetch books before navigating so dashboard and library are populated immediately
+      try {
+        await Promise.race([
+          fetchBooks(),
+          new Promise((resolve) => setTimeout(resolve, 800)),
+        ]);
+      } catch {}
     }
     return res.user;
   } catch (err) {
@@ -97,7 +117,15 @@ export async function loginUser({ email, password }) {
     if (!user) throw new Error(err.message || 'Incorrect email or password.');
     localStorage.setItem(SESSION_KEY, user.id);
     authStorage.setUser(user);
-    fetchBooks().catch(() => {});
+    const cachedBooks = read(getUserBooksKey(user.id), []);
+    write(BOOKS_KEY, cachedBooks);
+    notifyBooksChanged();
+    try {
+      await Promise.race([
+        fetchBooks(),
+        new Promise((resolve) => setTimeout(resolve, 800)),
+      ]);
+    } catch {}
     return user;
   }
 }
@@ -111,6 +139,9 @@ export async function loginWithGoogle({ email, name, avatar, googleId }) {
     if (res.user?.id) {
       localStorage.setItem(SESSION_KEY, res.user.id);
       authStorage.setUser(res.user);
+      const cachedBooks = read(getUserBooksKey(res.user.id), []);
+      write(BOOKS_KEY, cachedBooks);
+      notifyBooksChanged();
       const users = getUsers();
       const existingIndex = users.findIndex(
         (u) => u.id === res.user.id || (u.email || '').toLowerCase() === (res.user.email || '').toLowerCase()
@@ -121,7 +152,12 @@ export async function loginWithGoogle({ email, name, avatar, googleId }) {
         users.unshift(res.user);
       }
       write(USERS_KEY, users);
-      fetchBooks().catch(() => {});
+      try {
+        await Promise.race([
+          fetchBooks(),
+          new Promise((resolve) => setTimeout(resolve, 800)),
+        ]);
+      } catch {}
     }
     return res.user;
   } catch (err) {
@@ -143,7 +179,15 @@ export async function loginWithGoogle({ email, name, avatar, googleId }) {
     }
     localStorage.setItem(SESSION_KEY, user.id);
     authStorage.setUser(user);
-    fetchBooks().catch(() => {});
+    const cachedBooks = read(getUserBooksKey(user.id), []);
+    write(BOOKS_KEY, cachedBooks);
+    notifyBooksChanged();
+    try {
+      await Promise.race([
+        fetchBooks(),
+        new Promise((resolve) => setTimeout(resolve, 800)),
+      ]);
+    } catch {}
     return user;
   }
 }
@@ -153,6 +197,9 @@ export async function verify2FALogin({ tempToken, code }) {
   if (res.user?.id) {
     localStorage.setItem(SESSION_KEY, res.user.id);
     authStorage.setUser(res.user);
+    const cachedBooks = read(getUserBooksKey(res.user.id), []);
+    write(BOOKS_KEY, cachedBooks);
+    notifyBooksChanged();
     const users = getUsers();
     const existingIndex = users.findIndex(
       (u) => u.id === res.user.id || (u.email || '').toLowerCase() === (res.user.email || '').toLowerCase()
@@ -163,13 +210,22 @@ export async function verify2FALogin({ tempToken, code }) {
       users.unshift(res.user);
     }
     write(USERS_KEY, users);
-    fetchBooks().catch(() => {});
+    try {
+      await Promise.race([
+        fetchBooks(),
+        new Promise((resolve) => setTimeout(resolve, 800)),
+      ]);
+    } catch {}
   }
   return res.user;
 }
 
 export function logoutUser() {
+  const user = getCurrentUser();
   api.auth.logout();
+  if (user?.id) {
+    localStorage.removeItem(getUserBooksKey(user.id));
+  }
   localStorage.removeItem(SESSION_KEY);
   localStorage.removeItem(BOOKS_KEY);
   localStorage.removeItem(PROGRESS_KEY);
@@ -279,46 +335,58 @@ export const isTestBook = (b) => {
 };
 
 export const getBooks = () => {
+  const user = getCurrentUser();
   const books = read(BOOKS_KEY, []);
   const clean = books.filter((b) => !isTestBook(b));
   if (clean.length !== books.length) {
     write(BOOKS_KEY, clean);
   }
-  return clean;
+  if (!user?.id) return [];
+  // Strict user isolation: personal library only ever returns books uploaded by the current user
+  return clean.filter((b) => {
+    const owner = b.uploadedBy || b.uploaded_by;
+    return owner === user.id;
+  });
 };
 
 export const getUserBooks = (userId) => {
-  const books = getBooks();
-  if (!userId) return [];
   const user = getCurrentUser();
-  if (user?.role === 'admin') return books;
+  const targetId = userId || user?.id;
+  if (!targetId) return [];
+  // 1. Check user-scoped cache first for instant retrieval
+  const scopedBooks = read(getUserBooksKey(targetId), null);
+  if (Array.isArray(scopedBooks) && scopedBooks.length > 0) {
+    return scopedBooks.filter((b) => {
+      const owner = b.uploadedBy || b.uploaded_by;
+      return owner === targetId && !isTestBook(b);
+    });
+  }
+  // 2. Check global BOOKS_KEY filtered
+  const books = read(BOOKS_KEY, []).filter((b) => !isTestBook(b));
+  // Strict user isolation: books must explicitly belong to the target user
   return books.filter((b) => {
     const owner = b.uploadedBy || b.uploaded_by;
-    return owner === userId;
+    return owner === targetId;
   });
 };
 
 export function getUserStorageUsage(userId) {
-  const books = getBooks();
   const user = getCurrentUser();
-  const isAdmin = user?.role === 'admin';
-
-  let userBooks = books;
-  if (userId && !isAdmin) {
-    userBooks = books.filter((b) => {
-      const owner = b.uploadedBy || b.uploaded_by;
-      return owner === userId;
-    });
-  } else if (isAdmin) {
-    const adminBooks = books.filter((b) => {
-      const owner = b.uploadedBy || b.uploaded_by;
-      return owner === userId;
-    });
-    if (adminBooks.length > 0) {
-      userBooks = adminBooks;
-    }
+  const targetId = userId || user?.id;
+  if (!targetId) {
+    return {
+      usedBytes: 0,
+      maxBytes: ACCOUNT_STORAGE_LIMIT_BYTES,
+      remainingBytes: ACCOUNT_STORAGE_LIMIT_BYTES,
+      usedMB: 0,
+      maxMB: 50,
+      remainingMB: 50,
+      percentUsed: 0,
+      totalBooks: 0,
+    };
   }
 
+  const userBooks = getUserBooks(targetId);
   const usedBytes = userBooks.reduce((acc, b) => acc + (Number(b.size || b.file_size) || 0), 0);
   const maxBytes = ACCOUNT_STORAGE_LIMIT_BYTES;
   const remainingBytes = Math.max(0, maxBytes - usedBytes);
@@ -359,27 +427,27 @@ export function getDeletedBookIds() {
 
 export async function fetchBooks() {
   const user = getCurrentUser();
+  if (!user?.id) return [];
   const deletedSet = new Set(getDeletedBookIds());
-  const localBooks = getBooks();
-  const isAdmin = user?.role === 'admin';
+  const localBooks = read(BOOKS_KEY, []).filter((b) => !isTestBook(b));
 
   // 1. Try fetching from Backend API
   try {
     const books = await api.books.list();
     if (Array.isArray(books)) {
+      // Strictly isolate: only books uploaded by this user
       const cleanBooks = books.filter((b) => {
         if (!b || !b.id || deletedSet.has(b.id) || isTestBook(b)) return false;
-        if (isAdmin) return true;
         const owner = b.uploadedBy || b.uploaded_by;
-        return owner === user?.id;
+        return owner === user.id;
       });
 
-      // Merge remote books with existing local cache strictly matching user
+      // Merge remote books with existing local cache strictly matching this user
       const bookMap = new Map();
       for (const b of localBooks) {
         if (b && b.id && !deletedSet.has(b.id) && !isTestBook(b)) {
           const owner = b.uploadedBy || b.uploaded_by;
-          if (isAdmin || owner === user?.id) {
+          if (owner === user.id) {
             bookMap.set(b.id, b);
           }
         }
@@ -391,6 +459,26 @@ export async function fetchBooks() {
         (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
       );
       write(BOOKS_KEY, merged);
+      write(getUserBooksKey(user.id), merged);
+
+      // Restore reading progress from books payload into client progress storage
+      try {
+        const allProgress = read(PROGRESS_KEY, {});
+        let progChanged = false;
+        for (const b of merged) {
+          if (b.currentPage && b.currentPage > 1) {
+            allProgress[`${user.id}:${b.id}`] = {
+              page: b.currentPage,
+              updatedAt: b.progressUpdatedAt || new Date().toISOString(),
+            };
+            progChanged = true;
+          }
+        }
+        if (progChanged) {
+          write(PROGRESS_KEY, allProgress);
+        }
+      } catch {}
+
       notifyBooksChanged();
       return merged;
     }
@@ -401,62 +489,58 @@ export async function fetchBooks() {
   // 2. Direct Supabase Database fallback (only if validly configured)
   if (supabase && isSupabaseConfigured()) {
     try {
-      if (user?.id) {
-        let query = supabase.from('books').select('*');
-        if (!isAdmin) {
-          query = query.eq('uploaded_by', user.id);
-        }
-        const { data, error } = await query.order('created_at', { ascending: false });
+      let query = supabase.from('books').select('*').eq('uploaded_by', user.id);
+      const { data, error } = await query.order('created_at', { ascending: false });
 
-        if (!error && Array.isArray(data) && data.length > 0) {
-          const bookMap = new Map();
-          for (const b of localBooks) {
-            if (b && b.id && !deletedSet.has(b.id) && !isTestBook(b)) {
-              const owner = b.uploadedBy || b.uploaded_by;
-              if (isAdmin || owner === user?.id) {
-                bookMap.set(b.id, b);
-              }
+      if (!error && Array.isArray(data)) {
+        const bookMap = new Map();
+        for (const b of localBooks) {
+          if (b && b.id && !deletedSet.has(b.id) && !isTestBook(b)) {
+            const owner = b.uploadedBy || b.uploaded_by;
+            if (owner === user.id) {
+              bookMap.set(b.id, b);
             }
           }
-          for (const b of data) {
-            const formatted = {
-              id: b.id,
-              title: b.title,
-              author: b.author,
-              fileName: b.file_name,
-              fileType: b.file_type,
-              size: Number(b.file_size || 0),
-              totalPages: Number(b.total_pages || 0),
-              uploadedBy: b.uploaded_by,
-              r2Key: b.r2_key,
-              coverDataUrl: b.cover_data_url,
-              coverUrl: b.cover_url,
-              createdAt: b.created_at,
-            };
-            if (!deletedSet.has(formatted.id) && !isTestBook(formatted)) {
-              if (isAdmin || formatted.uploadedBy === user?.id) {
-                bookMap.set(formatted.id, formatted);
-              }
-            }
-          }
-          const clean = Array.from(bookMap.values()).sort(
-            (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
-          );
-          write(BOOKS_KEY, clean);
-          notifyBooksChanged();
-          return clean;
         }
+        for (const b of data) {
+          const formatted = {
+            id: b.id,
+            title: b.title,
+            author: b.author,
+            fileName: b.file_name,
+            fileType: b.file_type,
+            size: Number(b.file_size || 0),
+            totalPages: Number(b.total_pages || 0),
+            uploadedBy: b.uploaded_by,
+            r2Key: b.r2_key,
+            coverDataUrl: b.cover_data_url,
+            coverUrl: b.cover_url,
+            createdAt: b.created_at,
+          };
+          if (!deletedSet.has(formatted.id) && !isTestBook(formatted)) {
+            if (formatted.uploadedBy === user.id) {
+              bookMap.set(formatted.id, formatted);
+            }
+          }
+        }
+        const clean = Array.from(bookMap.values()).sort(
+          (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+        );
+        write(BOOKS_KEY, clean);
+        write(getUserBooksKey(user.id), clean);
+        notifyBooksChanged();
+        return clean;
       }
     } catch (sbErr) {
       console.warn('Could not query Supabase direct:', sbErr.message);
     }
   }
 
-  // 3. Keep local books cache, filtered to user
-  if (user?.id && !isAdmin) {
-    return localBooks.filter((b) => (b.uploadedBy || b.uploaded_by) === user.id);
-  }
-  return localBooks;
+  // 3. Keep local books cache, strictly filtered to current user
+  const userFiltered = localBooks.filter((b) => (b.uploadedBy || b.uploaded_by) === user.id);
+  write(BOOKS_KEY, userFiltered);
+  write(getUserBooksKey(user.id), userFiltered);
+  return userFiltered;
 }
 
 export async function uploadBookFile(file, metadata) {
@@ -480,7 +564,7 @@ export function addBook(book) {
   const item = {
     id: bookId,
     ...book,
-    uploadedBy: book.uploadedBy || book.uploaded_by || user?.id || 'demo_user',
+    uploadedBy: book.uploadedBy || book.uploaded_by || user?.id || null,
     totalPages: Number(book.totalPages || book.total_pages || 0),
     size: Number(book.size || book.file_size || 0),
     createdAt: book.createdAt || new Date().toISOString(),
@@ -499,7 +583,7 @@ export function recordUploadedBook(book) {
   }
   const normalized = {
     ...book,
-    uploadedBy: book.uploadedBy || book.uploaded_by || user?.id || 'demo_user',
+    uploadedBy: book.uploadedBy || book.uploaded_by || user?.id || null,
     totalPages: Number(book.totalPages || book.total_pages || 0),
     size: Number(book.size || book.file_size || 0),
   };

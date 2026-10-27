@@ -42,11 +42,11 @@ export function Library() {
   const [user, setUser] = useState(() => getCurrentUser());
   const [books, setBooks] = useState(() => {
     const u = getCurrentUser();
-    return u?.id ? getUserBooks(u.id) : getBooks();
+    return u?.id ? getUserBooks(u.id) : [];
   });
   const [loading, setLoading] = useState(() => {
     const u = getCurrentUser();
-    const init = u?.id ? getUserBooks(u.id) : getBooks();
+    const init = u?.id ? getUserBooks(u.id) : [];
     return init.length === 0;
   });
   const [query, setQuery] = useState('');
@@ -61,14 +61,19 @@ export function Library() {
   const loadBooks = useCallback(async () => {
     const activeUser = getCurrentUser();
     const activeId = activeUser?.id;
-    const isAdmin = activeUser?.role === 'admin';
 
     if (activeUser && activeUser.id !== user?.id) {
       setUser(activeUser);
     }
 
-    // Load instantly from local storage cache
-    const initial = (activeId && !isAdmin) ? getUserBooks(activeId) : getBooks();
+    if (!activeId) {
+      setBooks([]);
+      setLoading(false);
+      return;
+    }
+
+    // Load instantly from local storage cache strictly for this user
+    const initial = getUserBooks(activeId);
     if (initial.length > 0) {
       setBooks(initial);
       setStorage(getUserStorageUsage(activeId));
@@ -78,11 +83,11 @@ export function Library() {
     try {
       const fetched = await fetchBooks();
       if (Array.isArray(fetched)) {
-        // Admins see all books in the database; regular users see their uploaded books
-        const filtered = (activeId && !isAdmin) ? fetched.filter((b) => {
+        // Strict personal isolation: only books uploaded by the current user
+        const filtered = fetched.filter((b) => {
           const owner = b.uploadedBy || b.uploaded_by;
           return owner === activeId;
-        }) : fetched;
+        });
         setBooks(filtered);
         setStorage(getUserStorageUsage(activeId));
       }
@@ -180,11 +185,10 @@ export function Library() {
     try {
       await deleteBook(bookToDelete.id);
       const updated = await fetchBooks();
-      const isAdmin = user?.role === 'admin';
-      const filtered = (user?.id && !isAdmin) ? updated.filter((b) => {
+      const filtered = updated.filter((b) => {
         const owner = b.uploadedBy || b.uploaded_by;
-        return !owner || owner === user.id || owner === 'demo_user';
-      }) : updated;
+        return owner === user.id;
+      });
       setBooks(filtered);
       setStorage(getUserStorageUsage(user?.id));
       setBookToDelete(null);

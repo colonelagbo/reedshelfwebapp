@@ -9,32 +9,46 @@ export function Dashboard() {
   const user = getCurrentUser();
   const [books, setBooks] = useState(() => (user?.id ? getUserBooks(user.id) : []));
   const [plans, setPlans] = useState(() => (user?.id ? getUserPlans(user.id) : []));
+  const [loading, setLoading] = useState(() => {
+    const u = getCurrentUser();
+    const init = u?.id ? getUserBooks(u.id) : [];
+    return init.length === 0;
+  });
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!user?.id) return;
 
-    const loadData = () => {
-      fetchBooks().then((b) => {
-        if (b && Array.isArray(b)) {
-          const isAdmin = user?.role === 'admin';
-          const filtered = (user?.id && !isAdmin) ? b.filter((item) => {
-            const owner = item.uploadedBy || item.uploaded_by;
-            return owner === user.id;
-          }) : b;
-          setBooks(filtered);
+    let isMounted = true;
+    const loadData = async () => {
+      try {
+        const [b, p] = await Promise.allSettled([fetchBooks(), fetchPlans()]);
+        if (isMounted) {
+          if (b.status === 'fulfilled' && Array.isArray(b.value)) {
+            const filtered = b.value.filter((item) => {
+              const owner = item.uploadedBy || item.uploaded_by;
+              return owner === user.id;
+            });
+            setBooks(filtered);
+          }
+          if (p.status === 'fulfilled' && Array.isArray(p.value)) {
+            setPlans(p.value);
+          }
         }
-      }).catch(() => {});
-
-      fetchPlans().then((p) => {
-        if (p && Array.isArray(p)) setPlans(p);
-      }).catch(() => {});
+      } catch (err) {
+        // Ignored
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
     };
 
     loadData();
     window.addEventListener('reedshelf:books_updated', loadData);
     window.addEventListener('reedshelf:plans_updated', loadData);
     return () => {
+      isMounted = false;
       window.removeEventListener('reedshelf:books_updated', loadData);
       window.removeEventListener('reedshelf:plans_updated', loadData);
     };
@@ -46,6 +60,7 @@ export function Dashboard() {
   };
 
   const started = books.filter((b) => getProgress(user?.id, b.id).page > 1).slice(0, 3);
+  const unstarted = books.filter((b) => !started.some((s) => s.id === b.id));
 
   return (
     <AppShell>
@@ -85,18 +100,41 @@ export function Dashboard() {
           </div>
         </div>
 
+        {/* Main Reading Section */}
         <section className="mt-7 sm:mt-10">
           <div className="mb-3.5 sm:mb-4 flex items-center justify-between">
             <div>
-              <h2 className="text-lg sm:text-xl font-bold text-[#0b1619] dark:text-white">Continue reading</h2>
-              <p className="mt-0.5 text-xs sm:text-sm text-[#6b7a77] dark:text-white/60">Pick up where you left off.</p>
+              <h2 className="text-lg sm:text-xl font-bold text-[#0b1619] dark:text-white">
+                {started.length > 0 ? 'Continue reading' : books.length > 0 ? 'Your library' : 'Start reading'}
+              </h2>
+              <p className="mt-0.5 text-xs sm:text-sm text-[#6b7a77] dark:text-white/60">
+                {started.length > 0
+                  ? 'Pick up where you left off.'
+                  : books.length > 0
+                  ? 'Choose a book to begin reading.'
+                  : 'Add a book to start building your bookshelf.'}
+              </p>
             </div>
-            <Link to="/app/library" className="inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-[#009689] hover:underline dark:text-[#5fc4b8]">
-              View library <ArrowRight size={14} />
-            </Link>
+            {books.length > 0 && (
+              <Link to="/app/library" className="inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-[#009689] hover:underline dark:text-[#5fc4b8]">
+                View library <ArrowRight size={14} />
+              </Link>
+            )}
           </div>
 
-          {started.length ? (
+          {loading && books.length === 0 ? (
+            /* Loading Skeleton while books fetch from backend */
+            <div className="grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3">
+              {[1, 2, 3].map((n) => (
+                <div key={n} className="rounded-2xl border border-[#e4e1d6] bg-white p-4 animate-pulse dark:border-white/10 dark:bg-[#12232a]">
+                  <div className="aspect-[3/4] w-full rounded-xl bg-gray-200 dark:bg-white/10" />
+                  <div className="mt-3 h-4 w-3/4 rounded bg-gray-200 dark:bg-white/10" />
+                  <div className="mt-2 h-3 w-1/2 rounded bg-gray-200 dark:bg-white/10" />
+                </div>
+              ))}
+            </div>
+          ) : started.length > 0 ? (
+            /* Books currently in progress */
             <div className="grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3">
               {started.map((b) => (
                 <BookCard
@@ -107,12 +145,25 @@ export function Dashboard() {
                 />
               ))}
             </div>
+          ) : books.length > 0 ? (
+            /* Books in library ready to start reading */
+            <div className="grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3">
+              {books.slice(0, 6).map((b) => (
+                <BookCard
+                  key={b.id}
+                  book={b}
+                  progress={progress(b)}
+                  onOpen={() => navigate(`/app/reader/${b.id}`)}
+                />
+              ))}
+            </div>
           ) : (
+            /* Empty state ONLY when account genuinely has zero uploaded books */
             <div className="rounded-2xl border border-dashed border-[#c9d6d2] bg-white p-6 sm:p-10 text-center dark:border-white/15 dark:bg-white/5">
               <BookOpen className="mx-auto text-[#6b7a77] dark:text-white/40" size={32} />
-              <h3 className="mt-3 font-bold text-sm sm:text-base text-[#0b1619] dark:text-white">Nothing in progress yet</h3>
+              <h3 className="mt-3 font-bold text-sm sm:text-base text-[#0b1619] dark:text-white">Your library is empty</h3>
               <p className="mx-auto mt-1 max-w-md text-xs sm:text-sm text-[#6b7a77] dark:text-white/60">
-                Upload a PDF and start reading. ReedShelf will remember your place for next time.
+                Upload your first PDF book and start reading. ReedShelf will remember your place for next time.
               </p>
               <Link
                 to="/app/upload"
@@ -123,6 +174,31 @@ export function Dashboard() {
             </div>
           )}
         </section>
+
+        {/* Secondary Shelf: More books from library when user has started reading books */}
+        {started.length > 0 && unstarted.length > 0 && (
+          <section className="mt-7 sm:mt-10">
+            <div className="mb-3.5 sm:mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg sm:text-xl font-bold text-[#0b1619] dark:text-white">More from your library</h2>
+                <p className="mt-0.5 text-xs sm:text-sm text-[#6b7a77] dark:text-white/60">Other books ready on your shelf.</p>
+              </div>
+              <Link to="/app/library" className="inline-flex items-center gap-1 text-xs sm:text-sm font-semibold text-[#009689] hover:underline dark:text-[#5fc4b8]">
+                View all <ArrowRight size={14} />
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:gap-5 md:grid-cols-3">
+              {unstarted.slice(0, 3).map((b) => (
+                <BookCard
+                  key={b.id}
+                  book={b}
+                  progress={progress(b)}
+                  onOpen={() => navigate(`/app/reader/${b.id}`)}
+                />
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </AppShell>
   );

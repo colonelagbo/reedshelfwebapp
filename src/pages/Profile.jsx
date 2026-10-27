@@ -57,11 +57,10 @@ export function Profile() {
     const refresh = () => {
       fetchBooks().then((b) => {
         if (b && Array.isArray(b)) {
-          const isAdmin = user?.role === 'admin';
-          const userBooks = (user?.id && !isAdmin) ? b.filter((item) => {
+          const userBooks = b.filter((item) => {
             const owner = item.uploadedBy || item.uploaded_by;
-            return !owner || owner === user.id || owner === 'demo_user';
-          }) : b;
+            return owner === user.id;
+          });
           setBooks(userBooks);
           setStorage(getUserStorageUsage(user?.id));
         }

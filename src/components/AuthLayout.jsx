@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Download } from 'lucide-react';
 import { LogoPlaceholder } from './LogoPlaceholder';
@@ -17,10 +18,23 @@ export function AuthLayout({
   imageCaption = "“The reed bends to the breeze, yet stands forever rooted.”",
   imageSubcaption = "Built for mindful, grounding reading rituals.",
 }) {
-  const isStandalone = typeof window !== 'undefined' && (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.navigator.standalone === true
-  );
+  const [isStandalone, setIsStandalone] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true
+    );
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(display-mode: standalone)');
+    const onChange = (e) => setIsStandalone(e.matches || window.navigator.standalone === true);
+    if (media.addEventListener) {
+      media.addEventListener('change', onChange);
+      return () => media.removeEventListener('change', onChange);
+    }
+  }, []);
 
   if (!split) {
     return (
@@ -30,11 +44,12 @@ export function AuthLayout({
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'))}
-              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-[#009689]/30 bg-[#e6f4f2] px-3.5 py-1.5 text-xs font-bold text-[#007268] shadow-2xs transition hover:bg-[#009689] hover:text-white active:scale-95 dark:border-white/15 dark:bg-[#009689]/20 dark:text-[#5fc4b8] dark:hover:bg-[#009689] dark:hover:text-white touch-manipulation"
-              title="Install ReedShelf App"
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-[#009689]/30 bg-[#e6f4f2] px-3.5 py-1.5 text-xs font-bold text-[#007268] shadow-2xs transition hover:bg-[#009689] hover:text-white active:scale-95 dark:border-white/15 dark:bg-[#009689]/20 dark:text-[#5fc4b8] dark:hover:bg-[#009689] dark:hover:text-white touch-manipulation cursor-pointer"
+              title="Download & Install ReedShelf App"
+              aria-label="Download & Install ReedShelf App"
             >
               <Download size={14} className="shrink-0" />
-              <span>Install App</span>
+              <span>Download App</span>
             </button>
           )}
           <ThemeToggle className="border-[#e4e1d6] text-[#557067] hover:border-[#009689] hover:text-[#009689] dark:border-white/15 dark:text-white/60 dark:hover:border-[#d6a84a] dark:hover:text-[#d6a84a]" />
@@ -96,11 +111,12 @@ export function AuthLayout({
             <button
               type="button"
               onClick={() => window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'))}
-              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-[#009689]/30 bg-[#e6f4f2] px-3.5 py-1.5 text-xs font-bold text-[#007268] shadow-2xs transition hover:bg-[#009689] hover:text-white active:scale-95 dark:border-white/15 dark:bg-[#009689]/20 dark:text-[#5fc4b8] dark:hover:bg-[#009689] dark:hover:text-white touch-manipulation"
-              title="Install ReedShelf App"
+              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-full border border-[#009689]/30 bg-[#e6f4f2] px-3.5 py-1.5 text-xs font-bold text-[#007268] shadow-2xs transition hover:bg-[#009689] hover:text-white active:scale-95 dark:border-white/15 dark:bg-[#009689]/20 dark:text-[#5fc4b8] dark:hover:bg-[#009689] dark:hover:text-white touch-manipulation cursor-pointer"
+              title="Download & Install ReedShelf App"
+              aria-label="Download & Install ReedShelf App"
             >
               <Download size={14} className="shrink-0" />
-              <span>Install App</span>
+              <span>Download App</span>
             </button>
           )}
           <ThemeToggle className="border-[#e4e1d6] text-[#557067] hover:border-[#009689] hover:text-[#009689] dark:border-white/15 dark:text-white/60 dark:hover:border-[#d6a84a] dark:hover:text-[#d6a84a]" />

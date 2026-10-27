@@ -44,17 +44,18 @@ function formatBookRow(b) {
     coverDataUrl: b.cover_data_url || b.coverDataUrl || null,
     coverUrl,
     createdAt: b.created_at || b.createdAt,
+    currentPage: Number(b.current_page || b.currentPage || 1),
+    progressUpdatedAt: b.progress_updated_at || b.progressUpdatedAt || null,
   };
 }
 
 // GET /api/books/storage-usage - Get current account storage consumption
 booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
   try {
-    const isUserAdmin = req.user.role === 'admin';
     let usedBytes = 0;
     let totalBooks = 0;
 
-    // 1. Local database usage
+    // 1. Local database usage strictly for authenticated user
     const usageRow = db.get(
       'SELECT COALESCE(SUM(file_size), 0) as totalBytes, COUNT(id) as totalBooks FROM books WHERE uploaded_by = ?',
       [req.user.id]
@@ -62,23 +63,15 @@ booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
     usedBytes = Number(usageRow?.totalBytes || 0);
     totalBooks = Number(usageRow?.totalBooks || 0);
 
-    // If admin has not yet uploaded books under their specific ID, count managed library books
-    if (isUserAdmin && totalBooks === 0) {
-      const allRow = db.get('SELECT COALESCE(SUM(file_size), 0) as totalBytes, COUNT(id) as totalBooks FROM books');
-      usedBytes = Number(allRow?.totalBytes || 0);
-      totalBooks = Number(allRow?.totalBooks || 0);
-    }
-
     // 2. Cross-check Supabase PostgreSQL if configured
     if (config.isSupabaseConfigured()) {
       const supabase = getSupabaseClient();
       if (supabase) {
         try {
-          let query = supabase.from('books').select('file_size, uploaded_by');
-          if (!isUserAdmin) {
-            query = query.eq('uploaded_by', req.user.id);
-          }
-          const { data, error } = await query;
+          const { data, error } = await supabase
+            .from('books')
+            .select('file_size, uploaded_by')
+            .eq('uploaded_by', req.user.id);
           if (!error && Array.isArray(data) && data.length > 0) {
             const sbUsedBytes = data.reduce((sum, b) => sum + Number(b.file_size || 0), 0);
             usedBytes = Math.max(usedBytes, sbUsedBytes);
@@ -98,7 +91,7 @@ booksRouter.get('/storage-usage', authenticateToken, async (req, res) => {
         let metaCount = 0;
         for (const b of cloudMetadata) {
           const owner = b.uploadedBy || b.uploaded_by;
-          if (isUserAdmin || owner === req.user.id) {
+          if (owner === req.user.id) {
             metaUsed += Number(b.size || b.file_size || 0);
             metaCount++;
           }
@@ -150,21 +143,25 @@ booksRouter.get('/storage-config', optionalToken, async (req, res) => {
 let lastCloudBooksSyncTime = 0;
 const BOOKS_SYNC_INTERVAL = 15000; // 15 seconds throttle
 
-// GET /api/books - Get user's books (instant local response + strict isolation + background sync)
+// GET /api/books - Get user's personal books (strict user isolation + fast local response + background sync)
 booksRouter.get('/', authenticateToken, async (req, res) => {
   try {
-    const isUserAdmin = req.user.role === 'admin';
     const userId = req.user.id;
 
-    // Helper to query books from local database with strict user isolation
+    // Helper to query books from local database with strict user isolation and reading progress
     const queryLocalBooks = () => {
-      const rows = isUserAdmin
-        ? db.all('SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books ORDER BY created_at DESC')
-        : db.all(
-            'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? ORDER BY created_at DESC',
-            [userId]
-          );
-      return rows.map(formatBookRow);
+      const rows = db.all(
+        'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? ORDER BY created_at DESC',
+        [userId]
+      );
+      return rows.map((b) => {
+        const prog = db.get('SELECT page, updated_at FROM reading_progress WHERE user_id = ? AND book_id = ?', [userId, b.id]);
+        return formatBookRow({
+          ...b,
+          currentPage: prog?.page || 1,
+          progressUpdatedAt: prog?.updated_at || null,
+        });
+      });
     };
 
     let localBooks = queryLocalBooks();

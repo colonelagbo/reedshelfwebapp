@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthLayout } from '../components/AuthLayout';
 import { loginUser } from '../lib/appStore';
-import { Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { Mail, Lock, AlertCircle, Loader2, Eye, EyeOff, ArrowRight, Smartphone, Download } from 'lucide-react';
 import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
 
 export function Login() {
@@ -13,6 +13,24 @@ export function Login() {
   const [twoFactorData, setTwoFactorData] = useState(null); // { tempToken, email }
   const navigate = useNavigate();
   const location = useLocation();
+
+  const [isStandalone, setIsStandalone] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      window.navigator.standalone === true
+    );
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const media = window.matchMedia('(display-mode: standalone)');
+    const onChange = (e) => setIsStandalone(e.matches || window.navigator.standalone === true);
+    if (media.addEventListener) {
+      media.addEventListener('change', onChange);
+      return () => media.removeEventListener('change', onChange);
+    }
+  }, []);
 
   const handleAuthSuccess = (_user) => {
     navigate(location.state?.from || '/app/home', { replace: true });
@@ -69,6 +87,35 @@ export function Login() {
         </div>
       }
     >
+      {/* PWA Download Banner on Sign In */}
+      {!isStandalone && (
+        <div className="mb-4 flex items-center justify-between rounded-2xl border border-[#009689]/25 bg-[#e6f4f2]/70 p-2.5 sm:p-3 dark:border-[#009689]/30 dark:bg-[#009689]/15">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#009689] text-white shadow-2xs">
+              <Smartphone size={16} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-[#0b1619] dark:text-white truncate">
+                Download ReedShelf App
+              </p>
+              <p className="text-[11px] text-[#557067] dark:text-white/60 truncate">
+                Install on your device for fast, offline reading
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('reedshelf-trigger-install'))}
+            className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl bg-[#009689] px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs transition hover:bg-[#007268] active:scale-95 touch-manipulation shrink-0 ml-2 cursor-pointer"
+            title="Download & Install ReedShelf App"
+            aria-label="Download & Install ReedShelf App"
+          >
+            <Download size={13} />
+            <span>Download</span>
+          </button>
+        </div>
+      )}
+
       <form onSubmit={submit} className="space-y-4">
         {error && (
           <div className="flex items-start gap-2.5 rounded-xl bg-[#fff1ef] p-3 text-sm text-[#9b5147] dark:bg-[#3d1814] dark:text-[#fca5a5]">

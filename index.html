@@ -60,6 +60,20 @@
         }, 5000);
       });
     </script>
+    <script>
+      // Early capture of PWA beforeinstallprompt to prevent missing the event before React mounts
+      window.__reedshelf_deferred_prompt = null;
+      window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();
+        window.__reedshelf_deferred_prompt = e;
+        window.dispatchEvent(new CustomEvent('reedshelf-prompt-ready'));
+      });
+      window.addEventListener('appinstalled', function () {
+        window.__reedshelf_deferred_prompt = null;
+        localStorage.setItem('reedshelf_pwa_installed', 'true');
+        window.dispatchEvent(new CustomEvent('reedshelf-app-installed'));
+      });
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
