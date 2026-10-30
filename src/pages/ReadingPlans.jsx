@@ -32,6 +32,7 @@ import {
   fetchBooks,
   fetchPlans,
   searchRegisteredUsers,
+  isBookSharedWithUser,
 } from '../lib/appStore';
 
 const PRESET_DAYS = [
@@ -82,7 +83,7 @@ export function ReadingPlans() {
         if (b && Array.isArray(b)) {
           const userBooks = user?.id ? b.filter((item) => {
             const owner = item.uploadedBy || item.uploaded_by;
-            return owner === user.id;
+            return owner === user.id || item.isShared || isBookSharedWithUser(item, user);
           }) : [];
           setBooks(userBooks);
           setSelectedBookId((curr) => curr || bookIdParam || (userBooks.length > 0 ? userBooks[0].id : ''));
@@ -759,8 +760,9 @@ export function ReadingPlans() {
                 })
                 .map((plan) => {
                 const book = books.find((b) => b.id === (plan.bookId || plan.book_id));
+                const targetBookId = book?.id || plan.bookId || plan.book_id;
                 const isPdfUrl = (url) => typeof url === 'string' && (url.toLowerCase().endsWith('.pdf') || url.endsWith('/file') || url.includes('/file?'));
-                const cover = book?.coverDataUrl || (book?.coverUrl && !isPdfUrl(book.coverUrl) ? book.coverUrl : (book?.id ? `/api/books/${book.id}/cover` : null));
+                const cover = book?.coverDataUrl || (book?.coverUrl && !isPdfUrl(book.coverUrl) ? book.coverUrl : (targetBookId ? `/api/books/${targetBookId}/cover` : null));
                 const currentPage = book ? getProgress(user?.id, book.id).page : 1;
                 const total = book?.totalPages || plan.totalPages || plan.total_pages || 1;
                 const pct = Math.min(100, Math.round((currentPage / total) * 100));
@@ -887,9 +889,9 @@ export function ReadingPlans() {
                         {remainingPages > 0 ? `~${daysLeft} days left at target pace` : '🎉 Plan complete!'}
                       </span>
 
-                      {book && (
+                      {targetBookId && (
                         <button
-                          onClick={() => navigate(`/app/reader/${book.id}`)}
+                          onClick={() => navigate(`/app/reader/${targetBookId}`)}
                           className="inline-flex min-h-[40px] items-center justify-center gap-1.5 rounded-xl bg-[#009689] px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-[#007268] touch-manipulation"
                         >
                           <Play size={13} fill="currentColor" /> Continue Reading

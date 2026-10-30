@@ -31,6 +31,17 @@ const uid = (prefix = 'book') => `${prefix}_${crypto.randomBytes(8).toString('he
 
 function formatBookRow(b) {
   const coverUrl = b.cover_url || b.coverUrl || null;
+  let sharedWith = [];
+  if (b.shared_with) {
+    try {
+      sharedWith = typeof b.shared_with === 'string' ? JSON.parse(b.shared_with) : b.shared_with;
+    } catch {
+      sharedWith = [];
+    }
+  } else if (b.sharedWith) {
+    sharedWith = Array.isArray(b.sharedWith) ? b.sharedWith : [];
+  }
+
   return {
     id: b.id,
     title: b.title,
@@ -46,6 +57,9 @@ function formatBookRow(b) {
     createdAt: b.created_at || b.createdAt,
     currentPage: Number(b.current_page || b.currentPage || 1),
     progressUpdatedAt: b.progress_updated_at || b.progressUpdatedAt || null,
+    sharedWith: Array.isArray(sharedWith) ? sharedWith : [],
+    isShared: Boolean(b.isShared),
+    sharedBy: b.sharedBy || null,
   };
 }
 
@@ -143,21 +157,99 @@ booksRouter.get('/storage-config', optionalToken, async (req, res) => {
 let lastCloudBooksSyncTime = 0;
 const BOOKS_SYNC_INTERVAL = 15000; // 15 seconds throttle
 
-// GET /api/books - Get user's personal books (strict user isolation + fast local response + background sync)
+// Helper function to check if a book is shared with a given user
+function isBookSharedWithUser(book, user, groupPlanBookIds = new Set()) {
+  if (!book || !user) return false;
+  const targetEmail = (user.email || '').toLowerCase().trim();
+  const targetId = user.id;
+  const targetName = (user.name || '').toLowerCase().trim();
+  const targetClean = targetName.replace(/\s+/g, '');
+
+  if (groupPlanBookIds.has(book.id)) return true;
+
+  let sharedList = [];
+  if (book.shared_with) {
+    try {
+      sharedList = typeof book.shared_with === 'string' ? JSON.parse(book.shared_with) : book.shared_with;
+    } catch {
+      sharedList = [];
+    }
+  } else if (book.sharedWith) {
+    sharedList = Array.isArray(book.sharedWith) ? book.sharedWith : [];
+  }
+
+  if (Array.isArray(sharedList)) {
+    return sharedList.some((s) => {
+      if (typeof s === 'string') {
+        const sLow = s.toLowerCase().trim();
+        return sLow === targetEmail || sLow === targetId || sLow.replace(/[@\s]/g, '') === targetClean;
+      }
+      if (s && typeof s === 'object') {
+        const sEmail = (s.email || '').toLowerCase().trim();
+        const sId = s.id;
+        const sName = (s.name || s.username || '').toLowerCase().trim();
+        return sEmail === targetEmail || sId === targetId || sName.replace(/[@\s]/g, '') === targetClean;
+      }
+      return false;
+    });
+  }
+
+  return false;
+}
+
+// GET /api/books - Get user's personal books & books shared with them
 booksRouter.get('/', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Helper to query books from local database with strict user isolation and reading progress
+    // Helper to query books from local database including owned & shared books with reading progress
     const queryLocalBooks = () => {
-      const rows = db.all(
-        'SELECT id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at FROM books WHERE uploaded_by = ? ORDER BY created_at DESC',
-        [userId]
-      );
-      return rows.map((b) => {
+      const allRows = db.all('SELECT * FROM books ORDER BY created_at DESC') || [];
+      const allUsers = db.all('SELECT id, name, email, avatar FROM users') || [];
+      const userMap = new Map(allUsers.map((u) => [u.id, u]));
+      const userEmail = (req.user.email || '').toLowerCase().trim();
+      const userName = (req.user.name || '').toLowerCase().trim();
+      const userClean = userName.replace(/\s+/g, '');
+
+      // Group plan book ids
+      const groupPlans = db.all('SELECT book_id, group_members FROM reading_plans WHERE plan_type = ?', ['group']) || [];
+      const groupPlanBookIds = new Set();
+      for (const p of groupPlans) {
+        if (p.group_members) {
+          try {
+            const members = typeof p.group_members === 'string' ? JSON.parse(p.group_members) : p.group_members;
+            if (Array.isArray(members)) {
+              const inGroup = members.some((m) => {
+                const memStr = (typeof m === 'string' ? m : (m.username || m.name || m.email || m.id || '')).toLowerCase().trim();
+                const memClean = memStr.replace(/[@\s]/g, '');
+                return (
+                  memStr === userEmail ||
+                  memStr === userName ||
+                  memClean === userClean ||
+                  (m.id && m.id === userId)
+                );
+              });
+              if (inGroup) groupPlanBookIds.add(p.book_id);
+            }
+          } catch {
+            // ignore JSON parse error
+          }
+        }
+      }
+
+      const accessible = allRows.filter((b) => {
+        if (b.uploaded_by === userId) return true;
+        return isBookSharedWithUser(b, req.user, groupPlanBookIds);
+      });
+
+      return accessible.map((b) => {
+        const isShared = b.uploaded_by !== userId;
+        const owner = isShared ? userMap.get(b.uploaded_by) : null;
         const prog = db.get('SELECT page, updated_at FROM reading_progress WHERE user_id = ? AND book_id = ?', [userId, b.id]);
         return formatBookRow({
           ...b,
+          isShared,
+          sharedBy: owner ? { id: owner.id, name: owner.name, email: owner.email, avatar: owner.avatar } : (isShared ? { name: 'Another Reader' } : null),
           currentPage: prog?.page || 1,
           progressUpdatedAt: prog?.updated_at || null,
         });
@@ -197,7 +289,7 @@ booksRouter.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/books/:id - Get a single book
+// GET /api/books/:id - Get a single book (owned or shared)
 booksRouter.get('/:id', authenticateToken, async (req, res) => {
   try {
     let book = db.get('SELECT * FROM books WHERE id = ?', [req.params.id]);
@@ -218,6 +310,54 @@ booksRouter.get('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Book not found.' });
     }
 
+    const userId = req.user.id;
+    const isOwner = book.uploaded_by === userId;
+    const isAdmin = req.user.role === 'admin';
+
+    // Check if shared with user
+    let isSharedWithUser = false;
+    if (!isOwner && !isAdmin) {
+      const groupPlans = db.all('SELECT book_id, group_members FROM reading_plans WHERE plan_type = ? AND book_id = ?', ['group', book.id]) || [];
+      const groupPlanBookIds = new Set();
+      for (const p of groupPlans) {
+        if (p.group_members) {
+          try {
+            const members = typeof p.group_members === 'string' ? JSON.parse(p.group_members) : p.group_members;
+            if (Array.isArray(members)) {
+              const inGroup = members.some((m) => {
+                const memStr = (typeof m === 'string' ? m : (m.username || m.name || m.email || m.id || '')).toLowerCase().trim();
+                const memClean = memStr.replace(/[@\s]/g, '');
+                return (
+                  memStr === (req.user.email || '').toLowerCase() ||
+                  memStr === (req.user.name || '').toLowerCase() ||
+                  memClean === (req.user.name || '').toLowerCase().replace(/\s+/g, '') ||
+                  (m.id && m.id === userId)
+                );
+              });
+              if (inGroup) groupPlanBookIds.add(p.book_id);
+            }
+          } catch {
+            // ignore JSON parse error
+          }
+        }
+      }
+      isSharedWithUser = isBookSharedWithUser(book, req.user, groupPlanBookIds);
+
+      if (!isSharedWithUser) {
+        return res.status(403).json({ error: 'You do not have permission to view this book.' });
+      }
+    }
+
+    // Owner lookup
+    let sharedBy = null;
+    if (!isOwner) {
+      const owner = db.get('SELECT id, name, email, avatar FROM users WHERE id = ?', [book.uploaded_by]);
+      sharedBy = owner ? { id: owner.id, name: owner.name, email: owner.email, avatar: owner.avatar } : { name: 'Another Reader' };
+    }
+
+    // Reading progress for the current user
+    const prog = db.get('SELECT page, updated_at FROM reading_progress WHERE user_id = ? AND book_id = ?', [userId, book.id]);
+
     // Generate fresh signed URL if needed
     const storageKey = book.r2_key || book.r2Key;
     let freshSignedUrl = null;
@@ -225,7 +365,14 @@ booksRouter.get('/:id', authenticateToken, async (req, res) => {
       freshSignedUrl = await supabaseStorage.getSignedUrl(storageKey, 86400);
     }
 
-    const formatted = formatBookRow(book);
+    const formatted = formatBookRow({
+      ...book,
+      isShared: !isOwner,
+      sharedBy,
+      currentPage: prog?.page || 1,
+      progressUpdatedAt: prog?.updated_at || null,
+    });
+
     if (freshSignedUrl) {
       formatted.signedUrl = freshSignedUrl;
       formatted.coverUrl = freshSignedUrl;
@@ -234,6 +381,141 @@ booksRouter.get('/:id', authenticateToken, async (req, res) => {
     res.json(formatted);
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve book.' });
+  }
+});
+
+// POST /api/books/:id/share - Share a book with another user
+booksRouter.post('/:id/share', authenticateToken, async (req, res) => {
+  try {
+    const bookId = req.params.id;
+    const { email, username, userId: targetUserId } = req.body;
+
+    let book = db.get('SELECT * FROM books WHERE id = ?', [bookId]);
+    if (!book) {
+      return res.status(404).json({ error: 'Book not found.' });
+    }
+
+    // Only the book owner or admin can share
+    if (book.uploaded_by !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Only the book owner can share this book.' });
+    }
+
+    const query = (email || username || targetUserId || '').trim().toLowerCase();
+    if (!query) {
+      return res.status(400).json({ error: 'Please provide a valid reader username or email to share with.' });
+    }
+
+    const allUsers = db.all('SELECT id, name, email, avatar FROM users') || [];
+    const qClean = query.replace(/^@/, '').replace(/\s+/g, '');
+
+    const recipient = allUsers.find((u) => {
+      const uEmail = (u.email || '').toLowerCase().trim();
+      const uId = u.id;
+      const uName = (u.name || '').toLowerCase().trim();
+      const uClean = uName.replace(/\s+/g, '');
+      return uEmail === query || uId === query || uClean === qClean || uName === query;
+    });
+
+    if (!recipient) {
+      return res.status(404).json({ error: `No registered ReedShelf user was found matching "${query}".` });
+    }
+
+    if (recipient.id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot share a book with yourself.' });
+    }
+
+    let sharedWith = [];
+    if (book.shared_with) {
+      try {
+        sharedWith = typeof book.shared_with === 'string' ? JSON.parse(book.shared_with) : book.shared_with;
+      } catch {
+        sharedWith = [];
+      }
+    }
+
+    const alreadyShared = sharedWith.some(
+      (s) => s.id === recipient.id || (s.email && s.email.toLowerCase() === recipient.email.toLowerCase())
+    );
+
+    if (alreadyShared) {
+      return res.status(400).json({ error: `This book is already shared with ${recipient.name} (${recipient.email}).` });
+    }
+
+    const shareEntry = {
+      id: recipient.id,
+      name: recipient.name,
+      email: recipient.email,
+      avatar: recipient.avatar || null,
+      sharedAt: new Date().toISOString(),
+    };
+
+    sharedWith.push(shareEntry);
+    const sharedWithStr = JSON.stringify(sharedWith);
+
+    db.run('UPDATE books SET shared_with = ? WHERE id = ?', [sharedWithStr, bookId]);
+    recordBook({ ...book, shared_with: sharedWithStr }).catch(() => {});
+
+    res.json({
+      success: true,
+      message: `Book successfully shared with ${recipient.name}!`,
+      sharedWith,
+      book: formatBookRow({ ...book, shared_with: sharedWithStr }),
+    });
+  } catch (err) {
+    console.error('Error sharing book:', err);
+    res.status(500).json({ error: `Failed to share book: ${err.message}` });
+  }
+});
+
+// POST /api/books/:id/unshare - Revoke access to a shared book
+booksRouter.post('/:id/unshare', authenticateToken, async (req, res) => {
+  try {
+    const bookId = req.params.id;
+    const { email, userId: targetUserId } = req.body;
+
+    let book = db.get('SELECT * FROM books WHERE id = ?', [bookId]);
+    if (!book) {
+      return res.status(404).json({ error: 'Book not found.' });
+    }
+
+    const isOwner = book.uploaded_by === req.user.id;
+    const isAdmin = req.user.role === 'admin';
+    const isSelfRemove = targetUserId === req.user.id || (email && email.toLowerCase() === (req.user.email || '').toLowerCase());
+
+    // Allow owner, admin, OR the recipient themselves to remove the book from their shelf
+    if (!isOwner && !isAdmin && !isSelfRemove) {
+      return res.status(403).json({ error: 'You do not have permission to modify sharing for this book.' });
+    }
+
+    let sharedWith = [];
+    if (book.shared_with) {
+      try {
+        sharedWith = typeof book.shared_with === 'string' ? JSON.parse(book.shared_with) : book.shared_with;
+      } catch {
+        sharedWith = [];
+      }
+    }
+
+    const normEmail = (email || '').toLowerCase().trim();
+    sharedWith = sharedWith.filter((s) => {
+      if (targetUserId && s.id === targetUserId) return false;
+      if (normEmail && s.email && s.email.toLowerCase() === normEmail) return false;
+      return true;
+    });
+
+    const sharedWithStr = JSON.stringify(sharedWith);
+    db.run('UPDATE books SET shared_with = ? WHERE id = ?', [sharedWithStr, bookId]);
+    recordBook({ ...book, shared_with: sharedWithStr }).catch(() => {});
+
+    res.json({
+      success: true,
+      message: 'Access revoked successfully.',
+      sharedWith,
+      book: formatBookRow({ ...book, shared_with: sharedWithStr }),
+    });
+  } catch (err) {
+    console.error('Error unsharing book:', err);
+    res.status(500).json({ error: `Failed to revoke share access: ${err.message}` });
   }
 });
 
@@ -678,16 +960,7 @@ booksRouter.get('/:id/cover', optionalToken, async (req, res) => {
       return res.redirect(302, book.cover_url);
     }
 
-    // 2. Check Supabase Storage for covers/:id.webp
-    const client = getSupabaseClient();
-    if (client) {
-      const { data: pubData } = client.storage.from(config.supabase.bucketName || 'reedshelf-books').getPublicUrl(`covers/${bookId}.webp`);
-      if (pubData?.publicUrl) {
-        return res.redirect(302, pubData.publicUrl);
-      }
-    }
-
-    // 3. Fallback to cover_data_url if base64
+    // 2. Serve cover_data_url if base64 (front page cover generated at upload)
     if (book.cover_data_url && book.cover_data_url.startsWith('data:image/')) {
       const matches = book.cover_data_url.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
@@ -696,6 +969,15 @@ booksRouter.get('/:id/cover', optionalToken, async (req, res) => {
         res.setHeader('Content-Type', contentType);
         res.setHeader('Cache-Control', 'public, max-age=86400');
         return res.send(buffer);
+      }
+    }
+
+    // 3. Check Supabase Storage for covers/:id.webp
+    const client = getSupabaseClient();
+    if (client) {
+      const { data: pubData } = client.storage.from(config.supabase.bucketName || 'reedshelf-books').getPublicUrl(`covers/${bookId}.webp`);
+      if (pubData?.publicUrl) {
+        return res.redirect(302, pubData.publicUrl);
       }
     }
 

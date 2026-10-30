@@ -334,6 +334,63 @@ export const isTestBook = (b) => {
   );
 };
 
+export const isBookSharedWithUser = (book, user) => {
+  if (!book || !user) return false;
+  if (book.isShared) return true;
+  const targetEmail = (user.email || '').toLowerCase().trim();
+  const targetId = user.id;
+  const targetName = (user.name || '').toLowerCase().trim();
+  const targetClean = targetName.replace(/\s+/g, '');
+
+  let sharedList = [];
+  if (book.sharedWith) {
+    sharedList = Array.isArray(book.sharedWith) ? book.sharedWith : [];
+  } else if (book.shared_with) {
+    try {
+      sharedList = typeof book.shared_with === 'string' ? JSON.parse(book.shared_with) : book.shared_with;
+    } catch {
+      sharedList = [];
+    }
+  }
+
+  if (Array.isArray(sharedList)) {
+    const isMatch = sharedList.some((s) => {
+      if (typeof s === 'string') {
+        const str = s.toLowerCase().trim();
+        return str === targetEmail || str === targetId || str.replace(/[@\s]/g, '') === targetClean;
+      }
+      if (s && typeof s === 'object') {
+        const sEmail = (s.email || '').toLowerCase().trim();
+        const sId = s.id;
+        const sName = (s.name || s.username || '').toLowerCase().trim();
+        return sEmail === targetEmail || sId === targetId || sName.replace(/[@\s]/g, '') === targetClean;
+      }
+      return false;
+    });
+    if (isMatch) return true;
+  }
+
+  // Also check if book is part of any group plan where user is a participant
+  try {
+    const allPlans = read(PLANS_KEY, []);
+    const hasGroupPlan = allPlans.some((p) => {
+      const pBookId = p.bookId || p.book_id;
+      const pType = p.planType || p.plan_type;
+      if (pBookId === book.id && pType === 'group') {
+        const members = Array.isArray(p.members) ? p.members : (typeof p.group_members === 'string' ? JSON.parse(p.group_members || '[]') : []);
+        return members.some((m) => {
+          const mStr = (typeof m === 'string' ? m : (m.email || m.username || m.name || m.id || '')).toLowerCase().trim();
+          return mStr === targetEmail || mStr === targetId || mStr.replace(/[@\s]/g, '') === targetClean;
+        });
+      }
+      return false;
+    });
+    if (hasGroupPlan) return true;
+  } catch {}
+
+  return false;
+};
+
 export const getBooks = () => {
   const user = getCurrentUser();
   const books = read(BOOKS_KEY, []);
@@ -342,10 +399,10 @@ export const getBooks = () => {
     write(BOOKS_KEY, clean);
   }
   if (!user?.id) return [];
-  // Strict user isolation: personal library only ever returns books uploaded by the current user
+  // User's personal books PLUS books shared with this user
   return clean.filter((b) => {
     const owner = b.uploadedBy || b.uploaded_by;
-    return owner === user.id;
+    return owner === user.id || isBookSharedWithUser(b, user);
   });
 };
 
@@ -353,20 +410,21 @@ export const getUserBooks = (userId) => {
   const user = getCurrentUser();
   const targetId = userId || user?.id;
   if (!targetId) return [];
+  const targetUser = targetId === user?.id ? user : { id: targetId };
+
   // 1. Check user-scoped cache first for instant retrieval
   const scopedBooks = read(getUserBooksKey(targetId), null);
   if (Array.isArray(scopedBooks) && scopedBooks.length > 0) {
     return scopedBooks.filter((b) => {
       const owner = b.uploadedBy || b.uploaded_by;
-      return owner === targetId && !isTestBook(b);
+      return (owner === targetId || isBookSharedWithUser(b, targetUser)) && !isTestBook(b);
     });
   }
   // 2. Check global BOOKS_KEY filtered
   const books = read(BOOKS_KEY, []).filter((b) => !isTestBook(b));
-  // Strict user isolation: books must explicitly belong to the target user
   return books.filter((b) => {
     const owner = b.uploadedBy || b.uploaded_by;
-    return owner === targetId;
+    return owner === targetId || isBookSharedWithUser(b, targetUser);
   });
 };
 
@@ -386,7 +444,10 @@ export function getUserStorageUsage(userId) {
     };
   }
 
-  const userBooks = getUserBooks(targetId);
+  const userBooks = getUserBooks(targetId).filter((b) => {
+    const owner = b.uploadedBy || b.uploaded_by;
+    return owner === targetId; // Only owned books consume account storage quota!
+  });
   const usedBytes = userBooks.reduce((acc, b) => acc + (Number(b.size || b.file_size) || 0), 0);
   const maxBytes = ACCOUNT_STORAGE_LIMIT_BYTES;
   const remainingBytes = Math.max(0, maxBytes - usedBytes);
@@ -435,19 +496,21 @@ export async function fetchBooks() {
   try {
     const books = await api.books.list();
     if (Array.isArray(books)) {
-      // Strictly isolate: only books uploaded by this user
+      // Allow books uploaded by user OR shared with user
       const cleanBooks = books.filter((b) => {
         if (!b || !b.id || deletedSet.has(b.id) || isTestBook(b)) return false;
         const owner = b.uploadedBy || b.uploaded_by;
-        return owner === user.id;
+        const isShared = b.isShared || isBookSharedWithUser(b, user);
+        return owner === user.id || isShared;
       });
 
-      // Merge remote books with existing local cache strictly matching this user
+      // Merge remote books with existing local cache matching this user or shared
       const bookMap = new Map();
       for (const b of localBooks) {
         if (b && b.id && !deletedSet.has(b.id) && !isTestBook(b)) {
           const owner = b.uploadedBy || b.uploaded_by;
-          if (owner === user.id) {
+          const isShared = b.isShared || isBookSharedWithUser(b, user);
+          if (owner === user.id || isShared) {
             bookMap.set(b.id, b);
           }
         }
@@ -518,7 +581,7 @@ export async function fetchBooks() {
             createdAt: b.created_at,
           };
           if (!deletedSet.has(formatted.id) && !isTestBook(formatted)) {
-            if (formatted.uploadedBy === user.id) {
+            if (formatted.uploadedBy === user.id || isBookSharedWithUser(formatted, user)) {
               bookMap.set(formatted.id, formatted);
             }
           }
@@ -536,8 +599,8 @@ export async function fetchBooks() {
     }
   }
 
-  // 3. Keep local books cache, strictly filtered to current user
-  const userFiltered = localBooks.filter((b) => (b.uploadedBy || b.uploaded_by) === user.id);
+  // 3. Keep local books cache filtered to current user & shared books
+  const userFiltered = localBooks.filter((b) => (b.uploadedBy || b.uploaded_by) === user.id || isBookSharedWithUser(b, user));
   write(BOOKS_KEY, userFiltered);
   write(getUserBooksKey(user.id), userFiltered);
   return userFiltered;
@@ -635,6 +698,57 @@ export async function deleteBook(id) {
 
   await deleteBookFile(id);
   notifyBooksChanged();
+}
+
+export async function getBook(bookId) {
+  if (!bookId) return null;
+  const local = getBooks().find((b) => b.id === bookId);
+  if (local) return local;
+
+  try {
+    const remote = await api.books.get(bookId);
+    if (remote) {
+      const existing = read(BOOKS_KEY, []);
+      if (!existing.some((b) => b.id === remote.id)) {
+        write(BOOKS_KEY, [remote, ...existing]);
+        notifyBooksChanged();
+      }
+      return remote;
+    }
+  } catch (err) {
+    console.warn(`Could not fetch book ${bookId}:`, err.message);
+  }
+  return null;
+}
+
+export async function shareBook(bookId, target) {
+  const res = await api.books.share(bookId, target);
+  if (res?.book) {
+    const books = read(BOOKS_KEY, []);
+    const idx = books.findIndex((b) => b.id === bookId);
+    if (idx >= 0) {
+      books[idx] = { ...books[idx], ...res.book };
+      write(BOOKS_KEY, books);
+    } else {
+      write(BOOKS_KEY, [res.book, ...books]);
+    }
+    notifyBooksChanged();
+  }
+  return res;
+}
+
+export async function unshareBook(bookId, target) {
+  const res = await api.books.unshare(bookId, target);
+  if (res?.book) {
+    const books = read(BOOKS_KEY, []);
+    const idx = books.findIndex((b) => b.id === bookId);
+    if (idx >= 0) {
+      books[idx] = { ...books[idx], ...res.book };
+      write(BOOKS_KEY, books);
+    }
+    notifyBooksChanged();
+  }
+  return res;
 }
 
 // Progress

@@ -179,6 +179,47 @@ plansRouter.post('/', authenticateToken, (req, res) => {
 
     recordPlanInCloud(newPlan).catch(() => {});
 
+    // Automatically share the book with group plan members so they can read and view its front page
+    if (planType === 'group' && membersList.length > 0) {
+      try {
+        const book = db.get('SELECT * FROM books WHERE id = ?', [bookId]);
+        if (book) {
+          let sharedWith = [];
+          if (book.shared_with) {
+            try {
+              sharedWith = typeof book.shared_with === 'string' ? JSON.parse(book.shared_with) : book.shared_with;
+            } catch {
+              sharedWith = [];
+            }
+          }
+          let changed = false;
+          for (const m of membersList) {
+            const mEmail = (m.email || '').toLowerCase().trim();
+            const mId = m.id;
+            const exists = sharedWith.some(
+              (s) => (mId && s.id === mId) || (mEmail && s.email && s.email.toLowerCase() === mEmail)
+            );
+            if (!exists) {
+              sharedWith.push({
+                id: m.id || null,
+                name: m.name || m.username || 'Reader',
+                email: m.email || '',
+                username: m.username || '',
+                sharedAt: now,
+              });
+              changed = true;
+            }
+          }
+          if (changed) {
+            const sharedWithStr = JSON.stringify(sharedWith);
+            db.run('UPDATE books SET shared_with = ? WHERE id = ?', [sharedWithStr, bookId]);
+          }
+        }
+      } catch (shareErr) {
+        console.warn('[Plans Group Share]:', shareErr.message);
+      }
+    }
+
     res.status(201).json(newPlan);
   } catch (err) {
     console.error('Error creating plan:', err);

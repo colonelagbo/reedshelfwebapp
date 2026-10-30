@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS books (
   r2_key TEXT NOT NULL,
   cover_data_url TEXT,
   cover_url TEXT,
+  shared_with TEXT DEFAULT '[]',
   created_at TEXT NOT NULL,
   FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -617,9 +618,23 @@ function queryFallback(sql, params, mode) {
           target.push(userObj);
         }
       } else if (lower.includes('into books')) {
-        const [id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at] = params;
+        const [id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at, shared_with] = params;
         const existIdx = target.findIndex(b => b.id === id);
-        const bookObj = { id, title, author, file_name, file_type, file_size, total_pages, uploaded_by, r2_key, cover_data_url, cover_url, created_at };
+        const bookObj = {
+          id,
+          title,
+          author,
+          file_name,
+          file_type,
+          file_size,
+          total_pages,
+          uploaded_by,
+          r2_key,
+          cover_data_url,
+          cover_url,
+          created_at,
+          shared_with: shared_with || (existIdx >= 0 ? target[existIdx].shared_with : '[]') || '[]'
+        };
         if (existIdx >= 0) target[existIdx] = { ...target[existIdx], ...bookObj };
         else target.unshift(bookObj);
       } else if (lower.includes('into reading_plans')) {
@@ -720,15 +735,19 @@ function queryFallback(sql, params, mode) {
       const targetId = params[params.length - 1];
       const b = jsonStore.data.books.find(x => x.id === targetId);
       if (b) {
-        params.slice(0, -1).forEach(val => {
-          if (typeof val === 'string') {
-            if (val.startsWith('data:image') || val.startsWith('http')) b.cover_data_url = val;
-            else if (!b.title || val !== b.author) b.title = val;
-            else b.author = val;
-          } else if (typeof val === 'number') {
-            b.total_pages = val;
-          }
-        });
+        if (lower.includes('shared_with')) {
+          b.shared_with = params[0];
+        } else {
+          params.slice(0, -1).forEach(val => {
+            if (typeof val === 'string') {
+              if (val.startsWith('data:image') || val.startsWith('http')) b.cover_data_url = val;
+              else if (!b.title || val !== b.author) b.title = val;
+              else b.author = val;
+            } else if (typeof val === 'number') {
+              b.total_pages = val;
+            }
+          });
+        }
         jsonStore.save();
         return { changes: 1 };
       }

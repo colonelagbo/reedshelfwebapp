@@ -287,6 +287,20 @@ export const api = {
       });
     },
 
+    async share(id, { email, username, userId }) {
+      return await apiRequest(`/api/books/${id}/share`, {
+        method: 'POST',
+        body: JSON.stringify({ email, username, userId }),
+      });
+    },
+
+    async unshare(id, { email, userId }) {
+      return await apiRequest(`/api/books/${id}/unshare`, {
+        method: 'POST',
+        body: JSON.stringify({ email, userId }),
+      });
+    },
+
     async getStorageUsage() {
       return await apiRequest('/api/books/storage-usage');
     },

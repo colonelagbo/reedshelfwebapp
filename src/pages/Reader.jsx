@@ -29,13 +29,16 @@ import {
   Target,
   CheckCircle2,
   Search,
-  Download
+  Download,
+  Users,
+  Share2
 } from 'lucide-react';
 import {
   getBookFile,
   getCurrentUser,
   getProgress,
   getBooks,
+  getBook,
   saveProgress,
   getHighlights,
   fetchHighlights,
@@ -49,6 +52,7 @@ import {
   getDailyReadingStatus,
   getDailyQuotaForBook
 } from '../lib/appStore';
+import { ShareBookModal } from '../components/ShareBookModal';
 
 // Configure worker URL using Vite asset bundle with fallback
 if (typeof window !== 'undefined') {
@@ -249,8 +253,35 @@ export function Reader() {
   const user = getCurrentUser();
   const navigate = useNavigate();
 
-  const allBooks = getBooks();
-  const book = allBooks.find((b) => b.id === bookId);
+  const [book, setBook] = useState(() => getBooks().find((b) => b.id === bookId) || null);
+  const [showShareModal, setShowShareModal] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadBookMetadata() {
+      if (!bookId) return;
+      const local = getBooks().find((b) => b.id === bookId);
+      if (local && isMounted) {
+        setBook((prev) => (prev ? { ...prev, ...local } : local));
+        if (local.totalPages) setTotalPages(local.totalPages);
+      }
+      try {
+        const fetched = await getBook(bookId);
+        if (fetched && isMounted) {
+          setBook(fetched);
+          if (fetched.totalPages) {
+            setTotalPages(fetched.totalPages);
+          }
+        }
+      } catch (e) {
+        console.warn('Could not fetch book details in reader:', e);
+      }
+    }
+    loadBookMetadata();
+    return () => {
+      isMounted = false;
+    };
+  }, [bookId]);
 
   const [pdfDoc, setPdfDoc] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -469,6 +500,7 @@ export function Reader() {
       if (currentBook && (!currentBook.totalPages || currentBook.totalPages !== doc.numPages)) {
         updateBook(bookId, { totalPages: doc.numPages });
       }
+      setBook((prev) => (prev ? { ...prev, totalPages: doc.numPages } : { id: bookId, totalPages: doc.numPages }));
 
       setLoading(false);
     } catch (err) {
@@ -1335,11 +1367,21 @@ export function Reader() {
           </button>
 
           <div className="min-w-0 max-w-[110px] xs:max-w-[150px] sm:max-w-xs md:max-w-md">
-            <h1 className="truncate text-xs sm:text-base font-bold leading-tight" title={book?.title || 'Reading'}>
-              {book?.title || 'Reading Book'}
-            </h1>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <h1 className="truncate text-xs sm:text-base font-bold leading-tight" title={book?.title || 'Reading'}>
+                {book?.title || 'Reading Book'}
+              </h1>
+              {book?.isShared && (
+                <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-teal-500/20 px-2 py-0.5 text-[10px] font-semibold text-teal-300 border border-teal-500/30">
+                  <Users size={10} /> Shared
+                </span>
+              )}
+            </div>
             <p className="truncate text-[10px] sm:text-[11px] opacity-60 hidden sm:block leading-tight" title={book?.author || ''}>
               {book?.author || 'Unknown author'}
+              {book?.isShared && book?.sharedBy?.name && (
+                <span className="text-teal-400 font-medium"> • Shared by {book.sharedBy.name}</span>
+              )}
             </p>
           </div>
         </div>
@@ -1475,6 +1517,19 @@ export function Reader() {
               </span>
             )}
           </button>
+
+          {/* Share Book Button */}
+          {book && (
+            <button
+              type="button"
+              onClick={() => setShowShareModal(true)}
+              className="flex h-8 sm:h-9 items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-2.5 sm:px-3 text-xs font-semibold opacity-90 transition hover:bg-white/10 hover:opacity-100 cursor-pointer touch-manipulation text-white"
+              title="Share book with other readers"
+            >
+              <Share2 size={13} className="text-[#009689] dark:text-[#5fc4b8]" />
+              <span className="hidden md:inline">Share</span>
+            </button>
+          )}
 
           {/* Fullscreen toggle */}
           <button
@@ -1983,6 +2038,17 @@ export function Reader() {
             </div>
           </div>
         </div>
+      )}
+      {/* Share Book Modal */}
+      {showShareModal && book && (
+        <ShareBookModal
+          isOpen={showShareModal}
+          book={book}
+          onClose={() => setShowShareModal(false)}
+          onBookUpdated={(updated) => {
+            setBook(updated);
+          }}
+        />
       )}
     </div>
   );

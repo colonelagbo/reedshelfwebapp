@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ArrowRight, BookOpen, CalendarDays, Plus, Sparkles } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { BookCard } from '../components/BookCard';
-import { getCurrentUser, getUserBooks, getProgress, getUserPlans, fetchBooks, fetchPlans } from '../lib/appStore';
+import { getCurrentUser, getUserBooks, getProgress, getUserPlans, fetchBooks, fetchPlans, isBookSharedWithUser } from '../lib/appStore';
 
 export function Dashboard() {
   const user = getCurrentUser();
@@ -27,7 +27,7 @@ export function Dashboard() {
           if (b.status === 'fulfilled' && Array.isArray(b.value)) {
             const filtered = b.value.filter((item) => {
               const owner = item.uploadedBy || item.uploaded_by;
-              return owner === user.id;
+              return owner === user.id || item.isShared || isBookSharedWithUser(item, user);
             });
             setBooks(filtered);
           }

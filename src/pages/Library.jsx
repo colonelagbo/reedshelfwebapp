@@ -15,10 +15,13 @@ import {
   CheckCircle2,
   Flame,
   ArrowUpDown,
-  HardDrive
+  HardDrive,
+  Share2,
+  Users
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { BookCard } from '../components/BookCard';
+import { ShareBookModal } from '../components/ShareBookModal';
 import {
   getCurrentUser,
   getUserBooks,
@@ -27,7 +30,9 @@ import {
   getProgress,
   getSettings,
   saveSettings,
-  deleteBook
+  deleteBook,
+  isBookSharedWithUser,
+  api
 } from '../lib/appStore';
 
 const viewButtons = [
@@ -53,6 +58,7 @@ export function Library() {
   const [filterTab, setFilterTab] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
   const [bookToDelete, setBookToDelete] = useState(null);
+  const [sharingBook, setSharingBook] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [storage, setStorage] = useState(() => getUserStorageUsage(user?.id));
   const navigate = useNavigate();
@@ -71,7 +77,7 @@ export function Library() {
       return;
     }
 
-    // Load instantly from local storage cache strictly for this user
+    // Load instantly from local storage cache for this user & shared books
     const initial = getUserBooks(activeId);
     if (initial.length > 0) {
       setBooks(initial);
@@ -82,10 +88,9 @@ export function Library() {
     try {
       const fetched = await fetchBooks();
       if (Array.isArray(fetched)) {
-        // Strict personal isolation: only books uploaded by the current user
         const filtered = fetched.filter((b) => {
           const owner = b.uploadedBy || b.uploaded_by;
-          return owner === activeId;
+          return owner === activeId || b.isShared || isBookSharedWithUser(b, activeUser);
         });
         setBooks(filtered);
         setStorage(getUserStorageUsage(activeId));
@@ -120,8 +125,12 @@ export function Library() {
     let reading = 0;
     let completed = 0;
     let unread = 0;
+    let shared = 0;
 
     books.forEach((b) => {
+      if (b.isShared || (b.uploadedBy && user?.id && b.uploadedBy !== user.id)) {
+        shared++;
+      }
       const p = getProgress(user?.id, b.id).page;
       const total = b.totalPages || 0;
       if (total > 0 && p >= total) {
@@ -133,7 +142,7 @@ export function Library() {
       }
     });
 
-    return { total: books.length, reading, completed, unread };
+    return { total: books.length, reading, completed, unread, shared };
   }, [books, user?.id]);
 
   // Filtered and sorted books list
@@ -148,6 +157,7 @@ export function Library() {
       const isReading = p > 1 && !isCompleted;
       const isUnread = p <= 1;
 
+      if (filterTab === 'shared') return b.isShared || (b.uploadedBy && user?.id && b.uploadedBy !== user.id);
       if (filterTab === 'reading') return isReading;
       if (filterTab === 'completed') return isCompleted;
       if (filterTab === 'unread') return isUnread;
@@ -182,17 +192,17 @@ export function Library() {
     if (!bookToDelete || !user?.id) return;
     setDeleting(true);
     try {
-      await deleteBook(bookToDelete.id);
+      if (bookToDelete.isShared || (bookToDelete.uploadedBy && bookToDelete.uploadedBy !== user.id)) {
+        await api.books.unshare(bookToDelete.id, { userId: user.id, email: user.email });
+      } else {
+        await deleteBook(bookToDelete.id);
+      }
       const updated = await fetchBooks();
-      const filtered = updated.filter((b) => {
-        const owner = b.uploadedBy || b.uploaded_by;
-        return owner === user.id;
-      });
-      setBooks(filtered);
+      setBooks(updated);
       setStorage(getUserStorageUsage(user?.id));
       setBookToDelete(null);
     } catch (err) {
-      console.error('Failed to delete book:', err);
+      console.error('Failed to remove/delete book:', err);
     } finally {
       setDeleting(false);
     }
@@ -279,6 +289,7 @@ export function Library() {
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
             {[
               { id: 'all', label: 'All Books', count: stats.total },
+              { id: 'shared', label: 'Shared with Me', count: stats.shared },
               { id: 'reading', label: 'Currently Reading', count: stats.reading },
               { id: 'completed', label: 'Completed', count: stats.completed },
               { id: 'unread', label: 'Unread', count: stats.unread },
@@ -395,6 +406,7 @@ export function Library() {
                   view={view === 'wide' ? 'grid' : view}
                   onOpen={() => navigate(`/app/reader/${book.id}`)}
                   onDelete={() => setBookToDelete(book)}
+                  onShare={(b) => setSharingBook(b)}
                 />
               );
             })}
@@ -444,10 +456,13 @@ export function Library() {
                 <X size={18} />
               </button>
             </div>
-            <h3 className="mt-4 text-lg font-bold text-[#0b1619] dark:text-white">Delete this book?</h3>
+            <h3 className="mt-4 text-lg font-bold text-[#0b1619] dark:text-white">
+              {bookToDelete.isShared ? 'Remove shared book?' : 'Delete this book?'}
+            </h3>
             <p className="mt-1.5 text-sm text-[#6b7a77] dark:text-white/60">
-              "{bookToDelete.title}" will be permanently removed from your library, along with its reading
-              progress and highlights. This can't be undone.
+              {bookToDelete.isShared
+                ? `"${bookToDelete.title}" was shared with you by ${bookToDelete.sharedBy?.name || 'another reader'}. Removing it will hide it from your bookshelf without affecting the original file.`
+                : `"${bookToDelete.title}" will be permanently removed from your library, along with its reading progress and highlights. This can't be undone.`}
             </p>
             <div className="mt-6 flex justify-end gap-3">
               <button
@@ -464,16 +479,24 @@ export function Library() {
               >
                 {deleting ? (
                   <>
-                    <Loader2 size={16} className="animate-spin" /> Deleting...
+                    <Loader2 size={16} className="animate-spin" /> {bookToDelete.isShared ? 'Removing...' : 'Deleting...'}
                   </>
                 ) : (
-                  'Delete book'
+                  bookToDelete.isShared ? 'Remove from shelf' : 'Delete book'
                 )}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Share Book Modal */}
+      <ShareBookModal
+        book={sharingBook}
+        isOpen={Boolean(sharingBook)}
+        onClose={() => setSharingBook(null)}
+        onBookUpdated={() => loadBooks()}
+      />
     </AppShell>
   );
 }

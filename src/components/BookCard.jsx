@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, MoreHorizontal, Play, Trash2, CheckCircle2, Clock, Check, CalendarDays, Target } from 'lucide-react';
+import { BookOpen, MoreHorizontal, Play, Trash2, CheckCircle2, Clock, Check, CalendarDays, Target, Share2, Users } from 'lucide-react';
 import { getCurrentUser, getUserPlans } from '../lib/appStore';
 
 const isPdfUrl = (url) =>
@@ -15,7 +15,7 @@ const resolveCoverUrl = (book) => {
   return null;
 };
 
-export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete, view = 'grid' }) {
+export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete, onShare, view = 'grid' }) {
   const navigate = useNavigate();
   const [coverSrc, setCoverSrc] = useState(() => resolveCoverUrl(book));
   const [coverError, setCoverError] = useState(false);
@@ -24,7 +24,7 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
   useEffect(() => {
     setCoverSrc(resolveCoverUrl(book));
     setCoverError(false);
-  }, [book.coverDataUrl, book.coverUrl, book.id]);
+  }, [book]);
 
   const handleCoverError = () => {
     if (coverSrc === book.coverDataUrl && book.coverUrl && !isPdfUrl(book.coverUrl)) {
@@ -80,6 +80,15 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
       <div className="pointer-events-none absolute inset-y-0 left-0 w-3.5 bg-gradient-to-r from-black/35 via-black/15 to-transparent z-20" />
       <div className="pointer-events-none absolute inset-y-0 left-[3px] w-[1px] bg-white/20 z-20" />
       <div className="pointer-events-none absolute inset-0 rounded-2xl ring-1 ring-inset ring-black/10 dark:ring-white/10 z-20" />
+
+      {/* Shared badge overlay */}
+      {(book.isShared || (book.uploadedBy && user?.id && book.uploadedBy !== user.id)) && (
+        <div className="absolute top-2.5 right-2.5 z-20">
+          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600/90 text-white text-[10px] font-bold px-2 py-0.5 shadow-sm backdrop-blur-xs">
+            <Users size={10} /> Shared
+          </span>
+        </div>
+      )}
 
       {hasCover ? (
         <img
@@ -172,7 +181,12 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
+            {book.isShared && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 text-[10px] font-bold px-2 py-0.5">
+                <Users size={11} /> Shared by {book.sharedBy?.name || 'Reader'}
+              </span>
+            )}
             {isFinished ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold px-2 py-0.5">
                 <CheckCircle2 size={11} /> Finished
@@ -226,12 +240,25 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
             <Play fill="currentColor" size={13} />
             <span>{isStarted ? 'Continue' : 'Read'}</span>
           </button>
+          {onShare && !book.isShared && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onShare(book);
+              }}
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-[#557067] hover:bg-[#009689]/10 hover:text-[#009689] active:scale-95 transition"
+              aria-label={`Share ${book.title}`}
+              title="Share book"
+            >
+              <Share2 size={16} />
+            </button>
+          )}
           {onDelete && (
             <button
               onClick={handleDeleteClick}
               className="flex h-9 w-9 items-center justify-center rounded-xl text-[#9aa9a2] transition hover:bg-red-500/10 hover:text-red-500 active:scale-95"
-              aria-label={`Delete ${book.title}`}
-              title="Delete book"
+              aria-label={book.isShared ? `Remove ${book.title}` : `Delete ${book.title}`}
+              title={book.isShared ? 'Remove from shelf' : 'Delete book'}
             >
               <Trash2 size={16} />
             </button>
@@ -342,6 +369,23 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
                 <>
                   <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuOpen(false); }} />
                   <div className="absolute right-0 top-full z-40 mt-1 w-44 overflow-hidden rounded-xl border border-[#e4e1d6] bg-white py-1 shadow-xl dark:border-white/10 dark:bg-[#1a2c30]">
+                    {onShare && !book.isShared && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setMenuOpen(false);
+                          onShare(book);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-[#007268] hover:bg-[#009689]/10 dark:text-[#5fc4b8] dark:hover:bg-white/10 transition cursor-pointer"
+                      >
+                        <Share2 size={14} /> Share book
+                        {book.sharedWith?.length > 0 && (
+                          <span className="ml-auto rounded-full bg-[#009689]/15 px-1.5 py-0.2 text-[10px] text-[#007268] dark:text-[#5fc4b8]">
+                            {book.sharedWith.length}
+                          </span>
+                        )}
+                      </button>
+                    )}
                     <button
                       onClick={handlePlanClick}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-[#007268] hover:bg-[#009689]/10 dark:text-[#5fc4b8] dark:hover:bg-white/10 transition cursor-pointer"
@@ -353,7 +397,7 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
                         onClick={handleDeleteClick}
                         className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-red-500 hover:bg-red-500/10 transition cursor-pointer border-t border-stone-100 dark:border-white/5"
                       >
-                        <Trash2 size={14} /> Delete book
+                        <Trash2 size={14} /> {book.isShared ? 'Remove from shelf' : 'Delete book'}
                       </button>
                     )}
                   </div>
@@ -365,6 +409,12 @@ export function BookCard({ book, progress = 0, currentPage = 1, onOpen, onDelete
           <p className="mt-1 truncate text-[11px] sm:text-xs text-[#7b8c84] dark:text-white/60" title={book.author}>
             {book.author || 'Unknown author'}
           </p>
+
+          {book.isShared && (
+            <p className="mt-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 truncate flex items-center gap-1">
+              <Users size={11} className="shrink-0" /> Shared by {book.sharedBy?.name || 'Reader'}
+            </p>
+          )}
         </div>
 
         {/* Progress bar and page tracker */}
