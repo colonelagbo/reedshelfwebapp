@@ -40,6 +40,12 @@ export function AuthLayout({
     return (
       <div className="relative min-h-screen bg-[#f6f4ee] px-4 py-8 transition-colors duration-300 dark:bg-[#0b1619]">
         <div className="absolute right-4 top-4 flex items-center gap-2 sm:gap-3">
+          <Link
+            to="/pricing"
+            className="rounded-full px-3 py-1.5 text-xs font-semibold text-[#557067] hover:text-[#0b1619] dark:text-white/70 dark:hover:text-white transition"
+          >
+            Pricing
+          </Link>
           {!isStandalone && (
             <button
               type="button"
@@ -107,6 +113,12 @@ export function AuthLayout({
           </Link>
         </div>
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
+          <Link
+            to="/pricing"
+            className="rounded-full px-3 py-1.5 text-xs font-semibold text-[#557067] hover:text-[#0b1619] dark:text-white/70 dark:hover:text-white transition"
+          >
+            Pricing
+          </Link>
           {!isStandalone && (
             <button
               type="button"
@@ -189,7 +201,14 @@ export function AuthLayout({
 
       {/* Subtle Bottom Footer */}
       <footer className="w-full max-w-7xl mx-auto py-3 sm:py-4 text-center text-xs text-[#8b9a93] dark:text-white/40 border-t border-[#e4e1d6]/60 dark:border-white/5 mt-4 sm:mt-6">
-        <span>ReedShelf &copy; 2026. All rights reserved.</span>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-2">
+          <span>ReedShelf &copy; 2026. All rights reserved.</span>
+          <div className="flex items-center gap-4">
+            <Link to="/pricing" className="hover:text-[#009689] dark:hover:text-[#5fc4b8] transition">
+              Pricing Details (Free 50MB &bull; Paid Coming Soon)
+            </Link>
+          </div>
+        </div>
       </footer>
     </div>
   );

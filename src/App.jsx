@@ -9,6 +9,7 @@ import { Reader } from "./pages/Reader";
 import { ReadingPlans } from "./pages/ReadingPlans";
 import { Profile } from "./pages/Profile";
 import { Settings } from "./pages/Settings";
+import { Pricing } from "./pages/Pricing";
 import { NotFound } from "./pages/NotFound";
 import { ProtectedRoute } from "./pages/ProtectedRoute";
 import { AuthCallback } from "./pages/AuthCallback";
@@ -45,6 +46,7 @@ export default function App() {
         <Route path="/login" element={<Navigate to="/sign-in" replace />} />
         <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
         <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
+        <Route path="/pricing" element={<Pricing />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
         
         {/* User Application Shell */}
@@ -56,6 +58,7 @@ export default function App() {
         <Route path="/app/reading-plans" element={<Protected><ReadingPlans /></Protected>} />
         <Route path="/app/profile" element={<Protected><Profile /></Protected>} />
         <Route path="/app/settings" element={<Protected><Settings /></Protected>} />
+        <Route path="/app/pricing" element={<Protected><Pricing /></Protected>} />
 
         {/* Secure Admin Console */}
         <Route

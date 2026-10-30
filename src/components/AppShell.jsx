@@ -1,5 +1,5 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { BookOpen, Home, Library, ListChecks, Settings, UserCircle, Upload, LogOut, Menu, X, Shield, Plus, Download, HardDrive } from 'lucide-react';
+import { BookOpen, Home, Library, ListChecks, Settings, UserCircle, Upload, LogOut, Menu, X, Shield, Plus, Download, HardDrive, Sparkles } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getCurrentUser, getUserStorageUsage, logoutUser, getSettings, api, fetchBooks } from '../lib/appStore';
 import { LogoPlaceholder } from './LogoPlaceholder';
@@ -185,8 +185,8 @@ export function AppShell({ children }) {
                   <HardDrive size={14} className="text-[#009689] dark:text-[#5fc4b8]" />
                   Storage
                 </span>
-                <span className="font-bold text-[#009689] dark:text-[#5fc4b8]">
-                  {storage.usedMB} / 50 MB
+                <span className="rounded-md bg-[#e6f4f2] px-1.5 py-0.5 text-[10px] font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                  Free Tier (50 MB)
                 </span>
               </div>
               <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#e4e1d6] dark:bg-white/10">
@@ -202,12 +202,37 @@ export function AppShell({ children }) {
                 />
               </div>
               <div className="mt-1.5 flex items-center justify-between text-[11px] text-[#7b8c84] dark:text-white/40">
+                <span>{storage.usedMB} / 50 MB used</span>
                 <span>{storage.remainingMB} MB free</span>
-                <span>{storage.percentUsed}%</span>
               </div>
+              <NavLink
+                to="/pricing"
+                onClick={() => setOpen(false)}
+                className="mt-2.5 flex items-center justify-between rounded-xl bg-[#f6f4ee] px-2.5 py-1.5 text-[11px] font-semibold text-[#007268] hover:bg-[#e6f4f2] dark:bg-white/5 dark:text-[#5fc4b8] dark:hover:bg-white/10 transition"
+              >
+                <span className="flex items-center gap-1">
+                  <Sparkles size={11} className="text-[#d6a84a]" />
+                  Paid package coming soon
+                </span>
+                <span className="shrink-0 text-[10px] font-bold">&rarr;</span>
+              </NavLink>
             </div>
 
             <div className="mt-auto space-y-1 border-t border-[#e4e1d6] pt-4 dark:border-white/10">
+              <NavLink
+                to="/pricing"
+                onClick={() => setOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${
+                    isActive
+                      ? 'bg-[#e6f4f2] text-[#007268] font-bold dark:bg-[#009689]/15 dark:text-[#5fc4b8]'
+                      : 'text-[#667b72] hover:bg-white hover:text-[#0b1619] dark:text-white/50 dark:hover:bg-white/5 dark:hover:text-white'
+                  }`
+                }
+              >
+                <Sparkles size={19} className="text-[#d6a84a]" />
+                Pricing & Plans
+              </NavLink>
               <NavLink
                 to="/app/profile"
                 onClick={() => setOpen(false)}

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Moon,
   Sun,
@@ -13,7 +14,10 @@ import {
   Mail,
   LayoutGrid,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  HardDrive,
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import { useTheme } from '../lib/theme';
@@ -26,6 +30,7 @@ import {
   uploadAvatar,
   removeAvatar,
   updateUser,
+  getUserStorageUsage,
   api
 } from '../lib/appStore';
 
@@ -70,6 +75,7 @@ export function Settings() {
   });
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
+  const [storage, setStorage] = useState(() => getUserStorageUsage(initialUser?.id));
 
   // App Updates & Mobile Cache States
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -91,10 +97,19 @@ export function Settings() {
         setUser(u);
         setName(u.name || '');
         setAvatar(u.avatar || '');
+        setStorage(getUserStorageUsage(u.id));
       }
     };
+    const handleBooksUpdate = () => {
+      const u = getCurrentUser();
+      if (u?.id) setStorage(getUserStorageUsage(u.id));
+    };
     window.addEventListener('reedshelf:user_updated', handleUserUpdate);
-    return () => window.removeEventListener('reedshelf:user_updated', handleUserUpdate);
+    window.addEventListener('reedshelf:books_updated', handleBooksUpdate);
+    return () => {
+      window.removeEventListener('reedshelf:user_updated', handleUserUpdate);
+      window.removeEventListener('reedshelf:books_updated', handleBooksUpdate);
+    };
   }, []);
 
   // Fetch settings from server
@@ -537,12 +552,125 @@ export function Settings() {
               </div>
 
               {/* Status Indicator */}
-              {settingsSaved && (
+              {savingSettings ? (
+                <div className="flex items-center gap-2 text-xs font-semibold text-[#009689] dark:text-[#5fc4b8] animate-in fade-in">
+                  <Loader2 size={14} className="animate-spin" />
+                  <span>Saving preferences...</span>
+                </div>
+              ) : settingsSaved ? (
                 <div className="flex items-center gap-2 text-xs font-semibold text-[#009689] dark:text-[#5fc4b8] animate-in fade-in">
                   <Check size={14} />
                   <span>Preferences saved automatically</span>
                 </div>
-              )}
+              ) : null}
+            </div>
+          </section>
+
+          {/* SECTION: Subscription & Storage Plan */}
+          <section className="rounded-3xl border border-[#e4e1d6] bg-white p-5 sm:p-7 shadow-xs dark:border-white/10 dark:bg-[#142326]">
+            <div className="flex items-center justify-between border-b border-[#e4e1d6]/70 pb-4 dark:border-white/10">
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                  <HardDrive size={20} />
+                </span>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-[#0b1619] dark:text-white">
+                    Subscription & Storage Plan
+                  </h2>
+                  <p className="text-xs text-[#6b7a77] dark:text-white/60">
+                    Your active package allocation and upcoming tiers
+                  </p>
+                </div>
+              </div>
+              <Link
+                to="/pricing"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#009689]/30 bg-[#e6f4f2] px-3.5 py-1.5 text-xs font-bold text-[#007268] hover:bg-[#009689] hover:text-white dark:bg-[#009689]/20 dark:text-[#5fc4b8] dark:hover:bg-[#009689] dark:hover:text-white transition"
+              >
+                <span>View All Plans</span>
+                <ArrowRight size={13} />
+              </Link>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Active Free Tier Card */}
+              <div className="rounded-2xl border-2 border-[#009689]/30 bg-[#fbfcf9] p-5 dark:border-[#009689]/40 dark:bg-white/[0.03]">
+                <div className="flex items-center justify-between">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-[#009689]/10 px-2.5 py-0.5 text-xs font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                    <CheckCircle2 size={13} /> Active Package
+                  </span>
+                  <span className="text-sm font-extrabold text-[#0b1619] dark:text-white">$0 / Free</span>
+                </div>
+                <h3 className="mt-3 text-lg font-bold text-[#0b1619] dark:text-white">Free Package</h3>
+                <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60">
+                  Every account has a <strong>limited storage space of 50 MB per user</strong>.
+                </p>
+
+                {/* Storage Meter */}
+                <div className="mt-4 rounded-xl bg-white p-3 border border-[#e4e1d6] dark:border-white/10 dark:bg-white/5">
+                  <div className="flex justify-between text-xs">
+                    <span className="font-semibold text-[#0b1619] dark:text-white">Storage Used</span>
+                    <span className="font-bold text-[#009689] dark:text-[#5fc4b8]">
+                      {storage.usedMB} / 50 MB
+                    </span>
+                  </div>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-[#e4e1d6] dark:bg-white/10">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        storage.percentUsed > 90
+                          ? 'bg-red-500'
+                          : storage.percentUsed > 70
+                          ? 'bg-amber-500'
+                          : 'bg-[#009689] dark:bg-[#5fc4b8]'
+                      }`}
+                      style={{ width: `${Math.max(4, Math.min(100, storage.percentUsed))}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex justify-between text-[11px] text-[#7b8c84] dark:text-white/40">
+                    <span>{storage.remainingMB} MB available</span>
+                    <span>{storage.percentUsed}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Paid Package Teaser Card */}
+              <div className="rounded-2xl border-2 border-[#d6a84a]/40 bg-gradient-to-br from-white to-[#fbf8f0] p-5 dark:border-[#d6a84a]/30 dark:from-white/[0.03] dark:to-[#d6a84a]/5 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[#d6a84a] px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-[#0b1619]">
+                      <Sparkles size={12} /> Coming Soon
+                    </span>
+                    <span className="text-xs font-semibold text-[#d6a84a]">Paid Tier</span>
+                  </div>
+                  <h3 className="mt-3 text-lg font-bold text-[#0b1619] dark:text-white">Paid Package</h3>
+                  <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60">
+                    Expanded multi-gigabyte cloud storage, unlimited book capacity, and priority sync for heavy readers and researchers.
+                  </p>
+                  <ul className="mt-3 space-y-1.5 text-xs text-[#0b1619] dark:text-white/80">
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#d6a84a]" />
+                      <span>Multi-Gigabyte storage space</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#d6a84a]" />
+                      <span>Unlimited book uploads</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check size={14} className="text-[#d6a84a]" />
+                      <span>Priority synchronization</span>
+                    </li>
+                  </ul>
+                </div>
+
+                <div className="mt-5 pt-3 border-t border-[#e4e1d6] dark:border-white/10">
+                  <Link
+                    to="/pricing"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#d6a84a] py-2.5 text-xs font-bold text-[#0b1619] shadow-2xs hover:bg-[#e8c785] transition"
+                  >
+                    <span>View Pricing & Join Waitlist</span>
+                    <ArrowRight size={14} />
+                  </Link>
+                </div>
+              </div>
             </div>
           </section>
 

@@ -16,7 +16,8 @@ import {
   ArrowRight,
   Smartphone,
   Download,
-  HardDrive
+  HardDrive,
+  Sparkles
 } from 'lucide-react';
 import { AppShell } from '../components/AppShell';
 import {
@@ -26,7 +27,6 @@ import {
   getUserStorageUsage,
   updateUser,
   uploadAvatar,
-  removeAvatar,
   fetchBooks,
   fetchPlans,
   setCurrentUser,
@@ -421,14 +421,14 @@ export function Profile() {
                   <HardDrive size={20} />
                 </span>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h2 className="font-bold text-lg">Account Storage</h2>
                     <span className="inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-[#e6f4f2] text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
-                      50 MB Allotted
+                      Free Package (50 MB Limit)
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-[#6b7a77] dark:text-white/60 leading-relaxed">
-                    Each account is allocated 50 MB of cloud storage for PDF books. Quota updates automatically each time a book is uploaded or deleted.
+                    The Free package includes a limited storage space of 50 MB per user. Need more space? A paid package with multi-gigabyte storage is coming soon.
                   </p>
                 </div>
               </div>
@@ -471,6 +471,30 @@ export function Profile() {
                 <p className="text-xs text-[#7b8c84] dark:text-white/50">Books Stored</p>
                 <p className="mt-1 text-lg font-bold text-[#009689] dark:text-[#5fc4b8]">{storage.totalBooks}</p>
               </div>
+            </div>
+
+            {/* Paid Package Teaser */}
+            <div className="mt-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-[#d6a84a]/30 bg-[#fdf9f0] p-4 dark:border-[#d6a84a]/20 dark:bg-[#d6a84a]/10">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-[#d6a84a] text-[#0b1619] shrink-0">
+                  <Sparkles size={16} />
+                </span>
+                <div>
+                  <p className="text-xs font-bold text-[#0b1619] dark:text-white">
+                    Need more storage? Paid package coming soon
+                  </p>
+                  <p className="text-[11px] text-[#556963] dark:text-white/60">
+                    Get multi-gigabyte capacity, unlimited PDF uploads, and priority cloud sync.
+                  </p>
+                </div>
+              </div>
+              <Link
+                to="/pricing"
+                className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-[#009689] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#007268] transition"
+              >
+                <span>View Pricing & Details</span>
+                <ArrowRight size={13} />
+              </Link>
             </div>
           </section>
 

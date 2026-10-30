@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
   AlertCircle,
   FileText,
@@ -366,11 +366,19 @@ export function Upload() {
               <HardDrive size={16} />
             </span>
             <div>
-              <p className="text-xs font-bold text-[#0b1619] dark:text-white">
-                Account Storage: {storage.usedMB} MB / 50 MB
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-bold text-[#0b1619] dark:text-white">
+                  Free Package: {storage.usedMB} MB / 50 MB used
+                </p>
+                <span className="rounded-md bg-[#e6f4f2] px-1.5 py-0.2 text-[10px] font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                  50 MB Limit
+                </span>
+              </div>
               <p className="text-[11px] text-[#6b7a77] dark:text-white/60">
-                {storage.remainingMB} MB available for new books ({storage.percentUsed}% used)
+                {storage.remainingMB} MB available. Paid package coming soon for expanded storage.{' '}
+                <Link to="/pricing" className="font-semibold text-[#009689] hover:underline dark:text-[#5fc4b8]">
+                  View pricing details &rarr;
+                </Link>
               </p>
             </div>
           </div>
@@ -386,6 +394,10 @@ export function Upload() {
                 }`}
                 style={{ width: `${Math.max(4, Math.min(100, storage.percentUsed))}%` }}
               />
+            </div>
+            <div className="mt-1 flex justify-between text-[10px] text-[#7b8c84] dark:text-white/40">
+              <span>{storage.percentUsed}% used</span>
+              <span>50 MB max</span>
             </div>
           </div>
         </div>

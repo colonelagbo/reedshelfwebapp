@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, Smartphone, Download } from 'lucide-react';
+import { User, Mail, Lock, AlertCircle, Eye, EyeOff, Loader2, Smartphone, Download, HardDrive } from 'lucide-react';
 import { AuthLayout } from '../components/AuthLayout';
 import { registerUser } from '../lib/appStore';
 import { TwoFactorVerifyModal } from '../components/TwoFactorVerifyModal';
@@ -125,6 +125,29 @@ export function Register() {
           </button>
         </div>
       )}
+
+      {/* Pricing Package Info */}
+      <div className="mb-4 rounded-2xl border border-[#009689]/20 bg-[#f6f4ee] p-3 text-xs dark:border-white/10 dark:bg-white/5">
+        <div className="flex items-start gap-2.5">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-lg bg-[#009689]/15 text-[#009689] dark:bg-[#009689]/30 dark:text-[#5fc4b8] mt-0.5">
+            <HardDrive size={13} />
+          </span>
+          <div className="flex-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="font-bold text-[#0b1619] dark:text-white">Free Package Included</span>
+              <span className="rounded-full bg-[#009689]/10 px-2 py-0.5 text-[10px] font-bold text-[#007268] dark:bg-[#009689]/20 dark:text-[#5fc4b8]">
+                50 MB Storage
+              </span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-[#556963] dark:text-white/60 leading-normal">
+              Every user receives 50 MB limited storage space. Paid package with expanded storage coming soon!
+            </p>
+            <Link to="/pricing" className="mt-1 inline-flex items-center gap-1 font-semibold text-[#009689] dark:text-[#5fc4b8] hover:underline text-[11px]">
+              View pricing details &rarr;
+            </Link>
+          </div>
+        </div>
+      </div>
 
       <form onSubmit={submit} className="space-y-3.5">
         <div className="grid gap-3 sm:grid-cols-2">

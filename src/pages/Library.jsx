@@ -21,7 +21,6 @@ import { AppShell } from '../components/AppShell';
 import { BookCard } from '../components/BookCard';
 import {
   getCurrentUser,
-  getBooks,
   getUserBooks,
   getUserStorageUsage,
   fetchBooks,
@@ -211,12 +210,12 @@ export function Library() {
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <Link
-              to="/app/profile"
+              to="/pricing"
               className="inline-flex items-center gap-2 rounded-xl border border-[#dfe5dc] bg-white px-3.5 py-2.5 text-xs font-semibold text-[#0b1619] shadow-xs hover:border-[#009689] dark:border-white/10 dark:bg-[#142326] dark:text-white transition"
-              title="Account storage quota: 50 MB"
+              title="Free Package Storage: 50 MB limit. Click to view pricing details."
             >
               <HardDrive size={15} className="text-[#009689] dark:text-[#5fc4b8]" />
-              <span>Storage:</span>
+              <span className="hidden sm:inline">Free Tier:</span>
               <span className="font-bold text-[#009689] dark:text-[#5fc4b8]">{storage.usedMB} / 50 MB</span>
               <span className="hidden xs:inline text-[11px] text-[#7b8c84] dark:text-white/40">({storage.remainingMB} MB free)</span>
             </Link>
